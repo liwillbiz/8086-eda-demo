@@ -4,7 +4,7 @@
 
 namespace i8086::model::test {
 namespace {
-constexpr int64_t kStable = -1'000'000'000;
+constexpr int64_t kLongAgo = -1'000'000'000;
 }
 
 Harness::Harness(FaultSet faults, const std::string& die_file, double tclcl)
@@ -14,6 +14,9 @@ Harness::Harness(FaultSet faults, const std::string& die_file, double tclcl)
       tclcl_ns(tclcl),
       mem(1U << 20, 0) {
   dut->set_conditions({5.0, 25.0, tclcl_ns});
+  for (int i = 0; i < 16; ++i) drive_[pin("AD" + std::to_string(i))] = {Logic::Z, kLongAgo};
+  for (const char* p : {"RESET", "INTR", "NMI", "HOLD", "TEST_N"}) drive_[pin(p)] = {Logic::L0, kLongAgo};
+  for (const char* p : {"READY", "MN_MX_N"}) drive_[pin(p)] = {Logic::L1, kLongAgo};
 }
 
 Logic Harness::level(const std::string& name) const {
@@ -54,42 +57,57 @@ uint16_t Harness::read_word(const BusState& b) const {
   return static_cast<uint16_t>(mem[a] | (mem[(a + 1) & 0xFFFFF] << 8));
 }
 
-std::vector<InputSample> Harness::inputs_for(Edge next) {
-  std::vector<InputSample> s;
-  s.push_back({pin("RESET"), reset_high_ ? Logic::L1 : Logic::L0, kStable});
+void Harness::set(int p, Logic v, int64_t t) {
+  Drive& d = drive_[p];
+  if (d.v != v) d = Drive{v, t};
+}
+
+std::vector<InputSample> Harness::inputs_for(Edge next, int64_t edge_t) {
+  const int64_t prev = last_edge_t_;
+  set(pin("RESET"), reset_high_ ? Logic::L1 : Logic::L0, prev);
+  for (const auto& [name, v] : force) set(pin(name), v, prev);
   const BusState b = dut->bus_state();
   const bool reading = b.cycle == BusCycleType::CodeFetch || b.cycle == BusCycleType::MemRead ||
                        b.cycle == BusCycleType::IoRead;
   if (next == Edge::Rising && (state_ == TState::T3 || state_ == TState::Tw)) {
     const bool high = tw_ >= wait_states;
-    const int64_t changed = (high && ready_was_low_) ? ready_changed_ps : kStable;
-    s.push_back({pin("READY"), high ? Logic::L1 : Logic::L0, changed});
-    ready_was_low_ = !high;
+    if (high) {
+      set(pin("READY"), Logic::L1, edge_t + ready_changed_ps);
+    } else {
+      set(pin("READY"), Logic::L0, prev);
+    }
     if (high && reading) latch_pending_ = true;
-  } else {
-    s.push_back({pin("READY"), Logic::L1, kStable});
+  } else if (state_ != TState::T3 && state_ != TState::Tw) {
+    set(pin("READY"), Logic::L1, prev);
   }
   if (next == Edge::Falling && latch_pending_) {
     drive_data_ = read_word(b);
     for (int i = 0; i < 16; ++i) {
-      s.push_back({pin("AD" + std::to_string(i)), ((drive_data_ >> i) & 1) ? Logic::L1 : Logic::L0,
-                   data_changed_ps});
+      set(pin("AD" + std::to_string(i)), ((drive_data_ >> i) & 1) ? Logic::L1 : Logic::L0,
+          edge_t + data_changed_ps);
     }
     latch_pending_ = false;
     release_pending_ = true;
+    latch_t_ = edge_t;
   } else if (next == Edge::Rising && release_pending_) {
-    const auto low_ps = static_cast<int64_t>(std::llround(tclcl_ns * 1000.0 * 2.0 / 3.0));
-    for (int i = 0; i < 16; ++i) {
-      s.push_back({pin("AD" + std::to_string(i)), Logic::Z, data_release_ps - low_ps});
-    }
+    for (int i = 0; i < 16; ++i) set(pin("AD" + std::to_string(i)), Logic::Z, latch_t_ + data_release_ps);
     release_pending_ = false;
   }
-  for (const auto& [name, v] : force) s.push_back({pin(name), v, kStable});
+  std::vector<InputSample> s;
+  for (const auto& [p, d] : drive_) s.push_back({p, d.v, d.t - edge_t});
   return s;
 }
 
 void Harness::edge(Edge e) {
-  const std::vector<InputSample> in = inputs_for(e);
+  if (period_ps_ == 0) {
+    period_ps_ = std::llround(tclcl_ns * 1000.0);
+    high_ps_ = clk_high_ns > 0 ? std::llround(clk_high_ns * 1000.0) : period_ps_ / 3;
+  }
+  const int64_t edge_t = static_cast<int64_t>(periods_) * period_ps_ +
+                         (e == Edge::Rising ? period_ps_ - high_ps_ : 0);
+  if (e == Edge::Rising) ++periods_;
+  const std::vector<InputSample> in = inputs_for(e, edge_t);
+  last_edge_t_ = edge_t;
   dut->set_inputs(in);
   std::vector<PinEvent> ev = dut->clock_edge(e);
   bool ale_fell = false;

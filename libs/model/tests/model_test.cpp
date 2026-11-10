@@ -142,6 +142,48 @@ TEST(Sampling, DataHoldViolationCorruptsData) {
   EXPECT_EQ(first_fetch_bytes(bad), (std::array<uint8_t, 2>{0x15, 0xFF}));
 }
 
+// The hold window is measured from the latching edge using the real edge spacing the
+// tester's change times reveal, not an assumed duty cycle (here CLK is low 110 of 200 ns).
+TEST(Sampling, HoldCheckUsesTheTestersEdgeSpacing) {
+  const int64_t hold = 4000;  // good.yaml TCLDX
+  Harness ok;
+  ok.clk_high_ns = 90;
+  ok.data_release_ps = hold + 1000;
+  EXPECT_EQ(first_fetch_bytes(ok), (std::array<uint8_t, 2>{0xEA, 0x00}));
+  Harness bad;
+  bad.clk_high_ns = 90;
+  bad.data_release_ps = hold - 1000;
+  EXPECT_EQ(first_fetch_bytes(bad), (std::array<uint8_t, 2>{0x15, 0xFF}));
+}
+
+// The model derates its own setup/hold windows with ElectricalModel's k(VCC,T); the tester
+// derates the output delays, so those stay nominal here.
+TEST(Sampling, SetupWindowIsDeratedOutputDelaysAreNot) {
+  auto make = [](double vcc) {
+    auto h = std::make_unique<Harness>();
+    h->die.electrical["derate_alpha"] = 1.0;
+    h->die.electrical["derate_vt_v"] = 1.0;
+    h->die.electrical["derate_vnom_v"] = 5.0;
+    h->dut = make_behavioral(h->spec, h->die, {});
+    h->dut->set_conditions({vcc, 25.0, h->tclcl_ns});  // k = 4 / (vcc - 1)
+    h->data_changed_ps = -static_cast<int64_t>(h->die.timing_ns.at("TDVCL") * 1000) - 1000;
+    return h;
+  };
+  auto nominal = make(5.0);
+  EXPECT_EQ(first_fetch_bytes(*nominal), (std::array<uint8_t, 2>{0xEA, 0x00}));
+  auto slow = make(3.0);  // k = 2: 3 ns setup becomes 6 ns, so 4 ns is too late
+  EXPECT_EQ(first_fetch_bytes(*slow), (std::array<uint8_t, 2>{0x15, 0xFF}));
+  for (const test::EdgeLog& e : slow->log) {
+    for (const PinEvent& p : e.events) {
+      if (p.pin == slow->pin("ALE") && p.value == Logic::L1) {
+        EXPECT_EQ(p.delay_ps, static_cast<int64_t>(slow->die.timing_ns.at("TCLLH") * 1000));
+      }
+    }
+  }
+  auto h = make(5.0);
+  EXPECT_THROW(h->dut->set_conditions({1.0, 25.0, 200.0}), std::domain_error);
+}
+
 TEST(Sampling, ReadySetupViolationAddsAWaitState) {
   Harness ok;
   ok.wait_states = 1;
