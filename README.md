@@ -9,13 +9,14 @@ characterization.
 - Device facts: [`docs/8086-reference-brief.md`](docs/8086-reference-brief.md)
 - Decisions: [`docs/decisions.md`](docs/decisions.md)
 
-**Status: M6 (timing and electrical margins, shmoo).** On top of M5 (A1–A3, D1–D6, D8, D9,
-D11 with golden diff and differential fuzz), the B-suite (B1–B5) and C-suite (C1–C7) measure
-the die's real edges with searches and judge them against `spec.yaml`. `spec/dies/good.yaml`
-and `spec/dies/marginal.yaml` both pass every test at every grade × VCC × TA point.
-`i86test --shmoo` writes a VCC × frequency shmoo (CSV, ASCII, SVG). `./regress` diffs the
-results matrix and both dies' shmoos against `regression/baselines/`. B6 waits for interrupts
-in the model (M8).
+**Status: M7 (fault injection and coverage).** On top of M5 (A1–A3, D1–D6, D8, D9, D11
+with golden diff and differential fuzz) and M6 (B1–B5 and C1–C7 margins, shmoo), the
+`FaultInjector` applies every design §4.2 fault from `spec/dies/*.yaml`. Each of the 11
+`spec/dies/fault_*.yaml` dies must be caught by exactly the tests `regression/expected.yaml`
+lists for it, and `./regress` adds that fault-coverage table to `out/summary.md`.
+`spec/dies/good.yaml` and `spec/dies/marginal.yaml` pass every test at every grade × VCC × TA
+point. `./regress` diffs the results matrix and both dies' shmoos against
+`regression/baselines/`. B6 waits for interrupts in the model (M8).
 
 ## The four layers
 
@@ -48,7 +49,7 @@ test ROMs; `apt install nasm` / `brew install nasm`), and network access on the 
 (FetchContent downloads yaml-cpp and GoogleTest).
 
 ```bash
-./regress                  # build + unit tests + test matrix + shmoo (good, marginal) + baseline diff
+./regress                  # build + unit tests + test matrix + fault coverage + shmoo + baseline diff
 ./regress --accept         # same, then update regression/baselines/ (review the diff in the PR)
 
 cmake --workflow --preset dev          # debug build + unit tests only
@@ -56,6 +57,7 @@ cmake --preset asan && cmake --build --preset asan && ctest --preset asan
 
 build/regress/testprog/i86test --list
 build/regress/testprog/i86test --shmoo --die spec/dies/marginal.yaml --out out/shmoo
+build/regress/testprog/i86test --coverage regression/expected.yaml --vcc 4.5,5.5 --temp 70 --out out/faults
 build/regress/testprog/i86test --die spec/dies/good.yaml --grade 8086-2 \
     --vcc 4.5,5.0,5.5 --temp 0,70 --tests 'A*,D1-D11' --out out/
 ```

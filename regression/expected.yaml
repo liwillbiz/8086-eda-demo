@@ -5,7 +5,33 @@ schema_version: 1
 # Tests allowed to not pass on dies/good.yaml, each with a reason.
 waivers: []
 
-# For each dies/fault_*.yaml: the test IDs that must fail.
-# Example (M7):
-#   fault_stuck_ad3: [A1, A3, D1, D2]
-fault_coverage: {}
+# For each dies/fault_*.yaml: the test IDs that catch it (fail or error at one or more
+# points of grades {8086, 8086-2, 8086-1} x VCC {4.5, 5.5} x TA {70}). The match is
+# exact: a listed test that passes everywhere is a coverage hole, and an unlisted test
+# that fails means the fault reaches further than we think. `./regress` step 3 checks it
+# and writes out/coverage.md.
+fault_coverage:
+  # Data pin: every program reads garbage. A1 (reset fetch) and the DC pin tests do not care.
+  fault_stuck_ad3: [A1, A2, A3, B1, B2, B3, B4, B5, C2, C5, C6, C7,
+                    D1, D2, D3, D4, D5, D6, D8, D9, D11]
+  # Control pin: no write ever lands; A1 only fetches.
+  fault_stuck_wr_n: [A2, A3, B1, B2, B3, B4, B5, C2, C5, C6, C7,
+                     D1, D2, D3, D4, D5, D6, D8, D9, D11]
+  # RD# so late at 8086-1 that memory has already driven the bus: programs fetch garbage
+  # there (C1 errors while setting up its levels); at 8086-2 only B5 (TRLRH) sees it.
+  fault_slow_rd: [A1, A2, A3, B1, B2, B3, B4, B5, C1, C2, C5, C6, C7,
+                  D1, D2, D3, D4, D5, D6, D8, D9, D11]
+  # Slow corner (outputs and the internal path x1.6): B5 sees TCLAV; at 4.5 V the 8086-1 and
+  # 8086-2 run past Fmax (B1) and every program that writes fails.
+  fault_slow_all: [A1, A2, A3, B1, B2, B3, B4, B5, C2, C5, C6, C7,
+                   D1, D2, D3, D4, D5, D6, D8, D9, D11]
+  fault_setup_data: [B3]
+  fault_setup_ready: [B4]
+  # Wrong results at 4.5 V only: every program fails there; A1, C1, C3, C4 run no program.
+  fault_lowvcc: [A2, A3, B1, B2, B3, B4, B5, C2, C5, C6, C7,
+                 D1, D2, D3, D4, D5, D6, D8, D9, D11]
+  fault_leaky_ready: [C3]
+  fault_leaky_ad5: [C4]
+  # C6 runs the D-suite at the VCC corners, so it sees logic bugs too.
+  fault_inc_clears_cf: [C6, D2]
+  fault_shift_count_masked: [C6, D8]

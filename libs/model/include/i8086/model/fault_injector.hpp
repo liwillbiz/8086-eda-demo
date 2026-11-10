@@ -12,7 +12,8 @@ namespace i8086::model {
 // LowVccFail) around any DeviceModel, keeping the model logic fault-free.
 class FaultInjector final : public DeviceModel {
  public:
-  FaultInjector(const spec::Spec&, std::unique_ptr<DeviceModel> inner, FaultSet);
+  FaultInjector(const spec::Spec&, std::unique_ptr<DeviceModel> inner, FaultSet);  // throws spec::SpecError
+  ~FaultInjector() override;
 
   void set_conditions(const Conditions&) override;
   void set_inputs(std::span<const InputSample>) override;
@@ -26,6 +27,8 @@ class FaultInjector final : public DeviceModel {
   spec::Spec spec_;
   std::unique_ptr<DeviceModel> inner_;
   FaultSet faults_;
+  struct State;  // per-run fault state, defined in fault_injector.cpp
+  std::unique_ptr<State> state_;
 };
 
 }  // namespace i8086::model
