@@ -21,6 +21,8 @@ struct LevelSet {
   double vih = 2.4, vil = 0.45;  // drive levels
   double voh = 1.5, vol = 1.5;   // compare thresholds
   double iol_ma = 2.5, ioh_ua = -400.0;
+  double vch = 3.9, vcl = 0.6;   // CLK drive levels (M6, additive)
+  double cl_pf = 0.0;            // load capacitance on every output (M6, additive)
 };
 
 enum class DriveFormat { NRZ, RZ, R1 };
