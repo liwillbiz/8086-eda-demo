@@ -1,0 +1,40 @@
+# Simulated silicon for a "marginal" die: inside every spec.yaml limit, but only just,
+# at the worst corner (8086-1, 100 ns, 4.5 V, 70 °C: k = 1.33, CL = 100 pF adds 4 ns).
+# Owner: Model owner. Used by the M6 shmoo and margin reports.
+name: marginal
+
+timing_ns:
+  TCLAV: 33    # worst 48.0 ns                             (spec max 50)
+  TCLAZ: 25
+  TCLDV: 40
+  TCLLH: 22
+  TCHLL: 14
+  TCLRL: 45
+  TCLRH: 38
+  TCVCTV: 38
+  TCVCTX: 32
+  TCHCTV: 32
+  TDVCL: 3.6   # worst 4.8 ns                              (spec min 5)
+  TCLDX: 6
+  TRYHCH: 30
+  TCHRYX: 12
+  TINVCH: 10
+  TCLCL_CRIT: 72  # worst 96 ns                            (8086-1 TCLCL 100)
+
+electrical:
+  derate_vnom_v: 5.0
+  derate_vt_v: 1.0
+  derate_alpha: 1.5
+  derate_beta_per_c: 0.002
+  vin_threshold_v: 1.75        # switches 1.6-1.9 V        (spec VIH min 2.0)
+  vin_band_v: 0.3
+  vol_offset_v: 0.25           # VOL 0.425 V               (spec max 0.45)
+  ron_low_ohm: 70
+  voh_drop_v: 1.4              # VOH 2.7 V at 4.5 V        (spec min 2.4)
+  ron_high_ohm: 1000
+  leak_ua: 7                   #                           (spec 10 µA)
+  load_slope_ns_per_pf: 0.04
+  icc_base_ma: 300             # 327.5 mA at 5.5 V, 0 °C   (spec 340)
+  icc_ma_per_v: 30
+  icc_ma_per_c: -0.5
+faults: []
