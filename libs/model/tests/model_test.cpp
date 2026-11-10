@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <cmath>
+
 #include "harness.hpp"
 #include "i8086/common/errors.hpp"
 #include "i8086/model/device_model.hpp"
@@ -23,8 +25,14 @@ TEST(DieProfile, LoadsGoodDie) {
 }
 
 // The good die must sit inside every AC limit it maps onto, at every grade's fastest clock.
-TEST(DieProfile, GoodDieTimingInsideSpecWithMargin) {
-  const DieProfile die = DieProfile::load(I86_SOURCE_DIR "/spec/dies/good.yaml");
+class DieInsideSpec : public testing::TestWithParam<const char*> {};
+
+TEST_P(DieInsideSpec, TimingInsideSpecWithMargin) {
+  const DieProfile die = DieProfile::load(std::string(I86_SOURCE_DIR "/spec/dies/") + GetParam());
+  // ElectricalModel's k(VCC,T) at the worst corner, 4.5 V and 70 °C.
+  const auto e = [&](const char* key) { return die.electrical.at(key); };
+  const double k_worst = std::pow((e("derate_vnom_v") - e("derate_vt_v")) / (4.5 - e("derate_vt_v")), e("derate_alpha")) *
+                         (1 + e("derate_beta_per_c") * (70 - 25));
   for (spec::Grade g : spec::kAllGrades) {
     const double tclcl = the_spec().grade(g).tclcl_min_ns;
     for (const char* sym : {"TCLAV", "TCLRL", "TCLRH"}) {
@@ -46,7 +54,35 @@ TEST(DieProfile, GoodDieTimingInsideSpecWithMargin) {
     EXPECT_GT(tlhll, *the_spec().ac("TLHLL", g, tclcl).min);
     const double trhav = tclcl - die.timing_ns.at("TCLRH") + die.timing_ns.at("TCLAV");
     EXPECT_GT(trhav, *the_spec().ac("TRHAV", g, tclcl).min);
+    EXPECT_LT(die.timing_ns.at("TCLCL_CRIT") * k_worst, tclcl) << spec::to_string(g);
+    EXPECT_LT(die.timing_ns.at("TDVCL") * k_worst, *the_spec().ac("TDVCL", g, tclcl).min) << spec::to_string(g);
   }
+}
+INSTANTIATE_TEST_SUITE_P(Dies, DieInsideSpec, testing::Values("good.yaml", "marginal.yaml"),
+                         [](const testing::TestParamInfo<const char*>& p) {
+                           return std::string(p.param).substr(0, std::string(p.param).find('.'));
+                         });
+
+// Below the die's internal critical path (TCLCL_CRIT, derated) write data never settles:
+// the device drives X on AD in T2-T4 of a write instead of the data.
+TEST(Behavioral, WriteDataIsUnknownBelowTheCriticalPath) {
+  const std::vector<uint8_t> code{0xB8, 0x34, 0x12, 0xA3, 0x10, 0x00, 0xF4};  // mov ax,1234h; mov [10h],ax; hlt
+  const auto write_data = [&](double crit_ns) {
+    Harness h;
+    h.die.timing_ns["TCLCL_CRIT"] = crit_ns;
+    h.dut = make_behavioral(h.spec, h.die, {});
+    h.dut->set_conditions({5.0, 25.0, h.tclcl_ns});
+    h.boot(code);
+    h.reset();
+    EXPECT_TRUE(h.run_until_halt());
+    for (const test::Txn& t : h.txns) {
+      if (t.type == BusCycleType::MemWrite) return t.data;
+    }
+    ADD_FAILURE() << "no write cycle";
+    return uint16_t{0};
+  };
+  EXPECT_EQ(write_data(150), 0x1234);
+  EXPECT_NE(write_data(250), 0x1234);
 }
 
 TEST(DieProfile, MissingTimingKeyIsReported) {

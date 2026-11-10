@@ -51,6 +51,7 @@ DieTiming DieTiming::from(const DieProfile& die) {
       .tryhch = get("TRYHCH"),
       .tchryx = get("TCHRYX"),
       .tinvch = get("TINVCH"),
+      .tclcl_crit = die.timing_ns.contains("TCLCL_CRIT") ? get("TCLCL_CRIT") : 0,
   };
 }
 
@@ -162,8 +163,11 @@ void Core::set_conditions(const Conditions& c) {
   timing_.tryhch = scaled(nominal_.tryhch);
   timing_.tchryx = scaled(nominal_.tchryx);
   timing_.tinvch = scaled(nominal_.tinvch);
+  timing_.tclcl_crit = scaled(nominal_.tclcl_crit);
   conditions_ = c;
 }
+
+double Core::clock_period_ps() const { return conditions_.tclcl_ns * 1000.0; }
 
 // Time from the last edge to the upcoming one. A tester that reports every pin's change
 // time at every edge reveals it exactly (an unchanged pin's changed_ps moves by the gap);
@@ -208,7 +212,11 @@ std::vector<PinEvent> Core::clock_edge(Edge e) {
     initial_reported_ = true;
   }
   if (fault_) {
-    if (in_[static_cast<std::size_t>(pins_.reset)].v != Logic::L1) std::rethrow_exception(fault_);
+    // A fault is cleared only by RESET high; an undriven RESET (a new run's first edge)
+    // neither clears nor re-raises it.
+    const Logic reset = in_[static_cast<std::size_t>(pins_.reset)].v;
+    if (reset == Logic::L0) std::rethrow_exception(fault_);
+    if (reset != Logic::L1) return std::move(events_);
     enter_reset();
   }
   if (e == Edge::Rising) {
@@ -325,7 +333,12 @@ void Core::on_falling() {
         float_ad(timing_.tclaz);
         drive(pins_.rd_n, Logic::L0, timing_.tclrl);
       } else {
-        drive_ad(cur_->wdata, timing_.tcldv);
+        if (static_cast<double>(timing_.tclcl_crit) > clock_period_ps()) {
+          for (int p : pins_.ad) drive(p, Logic::X, timing_.tcldv);
+          ad_driven_ = true;
+        } else {
+          drive_ad(cur_->wdata, timing_.tcldv);
+        }
         drive(pins_.wr_n, Logic::L0, timing_.tcvctv);
       }
       drive(pins_.den_n, Logic::L0, timing_.tcvctv);
