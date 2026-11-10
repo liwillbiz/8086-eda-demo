@@ -1,0 +1,41 @@
+# Placeholder handles: replace each with the GitHub user or team for that role.
+#   @spec-integration-lead  P1  Spec & Integration lead  (L1 spec, build, CI, regression)
+#   @model-owner            P2  Model owner              (L2 device model, die profiles)
+#   @tester-owner           P3  Tester owner             (L3 tester, SimTester, ElectricalModel)
+#   @test-owner             P4  Test owner               (L4 test program, golden emulator)
+# Later rules win, so the public-header rules at the bottom override directory rules.
+
+*                         @spec-integration-lead
+
+# Layer 1 — Spec & Integration lead
+/spec/                    @spec-integration-lead
+/libs/spec/               @spec-integration-lead
+/libs/common/             @spec-integration-lead
+/CMakeLists.txt           @spec-integration-lead
+/CMakePresets.json        @spec-integration-lead
+/cmake/                   @spec-integration-lead
+/regress                  @spec-integration-lead
+/.github/                 @spec-integration-lead
+/docs/                    @spec-integration-lead
+
+# Layer 2 — Model owner
+/libs/model/              @model-owner
+/spec/dies/               @model-owner
+
+# Layer 3 — Tester owner
+/libs/tester/             @tester-owner
+
+# Layer 4 — Test owner
+/testprog/                @test-owner
+/libs/golden/             @test-owner
+
+# Regression expectations and baselines: changes need the integration lead plus layer owners.
+/regression/              @spec-integration-lead @model-owner @test-owner
+
+# Frozen public interfaces: layer owner AND Spec & Integration lead.
+/libs/spec/include/       @spec-integration-lead
+/libs/common/include/     @spec-integration-lead
+/libs/model/include/      @model-owner @spec-integration-lead
+/libs/tester/include/     @tester-owner @spec-integration-lead
+/libs/golden/include/     @test-owner @spec-integration-lead
+/testprog/include/        @test-owner @spec-integration-lead

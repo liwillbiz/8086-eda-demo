@@ -1,0 +1,72 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": { "I86_BUILD_TESTS": "ON" }
+    },
+    {
+      "name": "dev",
+      "displayName": "Debug build with tests",
+      "inherits": "base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "asan",
+      "displayName": "Debug + AddressSanitizer/UBSan",
+      "inherits": "base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "I86_ASAN": "ON" }
+    },
+    {
+      "name": "release",
+      "displayName": "Optimized build",
+      "inherits": "base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
+      "name": "regress",
+      "displayName": "Regression build used by ./regress and CI",
+      "inherits": "base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo", "I86_WERROR": "ON" }
+    }
+  ],
+  "buildPresets": [
+    { "name": "dev", "configurePreset": "dev" },
+    { "name": "asan", "configurePreset": "asan" },
+    { "name": "release", "configurePreset": "release" },
+    { "name": "regress", "configurePreset": "regress" }
+  ],
+  "testPresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error", "stopOnFailure": false }
+    },
+    { "name": "dev", "inherits": "base", "configurePreset": "dev" },
+    { "name": "asan", "inherits": "base", "configurePreset": "asan" },
+    { "name": "release", "inherits": "base", "configurePreset": "release" },
+    { "name": "regress", "inherits": "base", "configurePreset": "regress" }
+  ],
+  "workflowPresets": [
+    {
+      "name": "dev",
+      "steps": [
+        { "type": "configure", "name": "dev" },
+        { "type": "build", "name": "dev" },
+        { "type": "test", "name": "dev" }
+      ]
+    },
+    {
+      "name": "regress",
+      "steps": [
+        { "type": "configure", "name": "regress" },
+        { "type": "build", "name": "regress" },
+        { "type": "test", "name": "regress" }
+      ]
+    }
+  ]
+}

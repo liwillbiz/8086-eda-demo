@@ -1,0 +1,11 @@
+# Regression expectations (design doc §8). Owner: Spec & Integration lead,
+# with the Model and Test owners for fault coverage (M7).
+schema_version: 1
+
+# Tests allowed to not pass on dies/good.yaml, each with a reason.
+waivers: []
+
+# For each dies/fault_*.yaml: the test IDs that must fail.
+# Example (M7):
+#   fault_stuck_ad3: [A1, A3, D1, D2]
+fault_coverage: {}

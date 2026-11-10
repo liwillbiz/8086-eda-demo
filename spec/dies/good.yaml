@@ -1,0 +1,7 @@
+# Simulated silicon for a "good" die: inside every spec.yaml limit with margin.
+# Owner: Model owner. Read only by the device model and ElectricalModel.
+# M0 skeleton; M3 fills `timing_ns`, M6 fills `electrical`, M7 adds `faults`.
+name: good
+timing_ns: {}
+electrical: {}
+faults: []
