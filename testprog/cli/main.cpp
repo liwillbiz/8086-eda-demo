@@ -1,11 +1,14 @@
 // i86test — run the brief's test program across a grade x VCC x temperature matrix.
 
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <sstream>
 #include <string>
 #include <vector>
 
 #include "i8086/testprog/runner.hpp"
+#include "shmoo.hpp"
 
 namespace {
 
@@ -29,15 +32,18 @@ std::vector<double> split_doubles(const std::string& s) {
 void usage(std::ostream& os) {
   os << "usage: i86test [--spec FILE] [--die FILE] [--grade G[,G...]] [--vcc V[,V...]]\n"
         "               [--temp C[,C...]] [--tests SEL] [--out DIR] [--list]\n"
+        "       i86test --shmoo [--spec FILE] [--die FILE] [--temp C] [--out DIR]\n"
         "  SEL: comma-separated ids, prefixes or ranges, e.g. 'A*,D1-D11' (default '*')\n"
-        "  G:   8086, 8086-2, 8086-1 (default: all)\n";
+        "  G:   8086, 8086-2, 8086-1 (default: all)\n"
+        "  --shmoo writes shmoo.csv, shmoo.txt and shmoo.svg (VCC x MHz, design doc 6.5) and\n"
+        "          exits 1 if a cell inside a grade's spec box fails\n";
 }
 
 }  // namespace
 
 int main(int argc, char** argv) {
   testprog::RunConfig cfg;
-  bool list = false;
+  bool list = false, shmoo = false;
   try {
     for (int i = 1; i < argc; ++i) {
       const std::string arg = argv[i];
@@ -55,6 +61,7 @@ int main(int argc, char** argv) {
         cfg.grades.clear();
         for (const auto& g : split(value())) cfg.grades.push_back(spec::parse_grade(g));
       } else if (arg == "--list") list = true;
+      else if (arg == "--shmoo") shmoo = true;
       else if (arg == "-h" || arg == "--help") {
         usage(std::cout);
         return 0;
@@ -75,6 +82,23 @@ int main(int argc, char** argv) {
         std::cout << id << "  " << reg.create(id)->title() << "\n";
       }
       return 0;
+    }
+    if (shmoo) {
+      testprog::ShmooConfig sc;
+      sc.spec_path = cfg.spec_path;
+      sc.die_path = cfg.die_path;
+      sc.temp_c = cfg.temp_c.empty() ? 25.0 : cfg.temp_c.front();
+      const auto r = testprog::run_shmoo(sc);
+      std::filesystem::create_directories(cfg.out_dir);
+      std::ofstream csv(cfg.out_dir / "shmoo.csv");
+      testprog::write_shmoo_csv(csv, r);
+      std::ostringstream ascii;
+      testprog::write_shmoo_ascii(ascii, r);
+      std::ofstream(cfg.out_dir / "shmoo.txt") << ascii.str();
+      std::ofstream svg(cfg.out_dir / "shmoo.svg");
+      testprog::write_shmoo_svg(svg, r);
+      std::cout << ascii.str();
+      return r.box_fails() == 0 ? 0 : 1;
     }
     return testprog::run(cfg).ok() ? 0 : 1;
   } catch (const std::exception& e) {

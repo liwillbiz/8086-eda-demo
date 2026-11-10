@@ -59,8 +59,11 @@ add_library(i86testprog
   src/rom_case.cpp
   src/functional.cpp
   src/protocol.cpp
+  src/margin.cpp
+  src/shmoo.cpp
   report/datalog.cpp
   report/summary.cpp
+  report/shmoo.cpp
   ${I86_EMBEDDED_CPP})
 add_library(i86::testprog ALIAS i86testprog)
 target_include_directories(i86testprog
@@ -78,11 +81,12 @@ i86_target_defaults(i86cases)
 
 add_executable(i86test cli/main.cpp)
 target_link_libraries(i86test PRIVATE i86cases i86::testprog)
+target_include_directories(i86test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 i86_target_defaults(i86test)
 
 i86_add_unit_test(testprog_unit
   SOURCES tests/smoke_test.cpp tests/harness_test.cpp tests/cases_test.cpp
-          tests/differential_fuzz_test.cpp tests/report_test.cpp
+          tests/differential_fuzz_test.cpp tests/report_test.cpp tests/margin_test.cpp
   LIBS i86cases i86::testprog)
 if(TARGET testprog_unit)
   target_include_directories(testprog_unit PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
