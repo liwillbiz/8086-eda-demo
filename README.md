@@ -9,9 +9,11 @@ characterization.
 - Device facts: [`docs/8086-reference-brief.md`](docs/8086-reference-brief.md)
 - Decisions: [`docs/decisions.md`](docs/decisions.md)
 
-**Status: M0 (skeleton and frozen interfaces).** Every public header compiles, and the
-stub implementations throw `NotImplemented`, which the runner reports as **Error**.
-`./regress` runs green end to end with no test cases registered yet.
+**Status: M5 (test program v1).** The golden emulator (M2), device model (M3) and tester
+(M4) are integrated. Tests A1–A3, D1–D6, D8, D9 and D11 pass on the good die at every grade ×
+VCC × TA point, a model-vs-golden differential fuzz runs under `ctest`, and `./regress` diffs
+the results matrix against `regression/baselines/good_results.csv`. Later milestones' tests
+are not registered yet.
 
 ## The four layers
 
@@ -39,8 +41,9 @@ to *discover* how a die differs.
 
 ## Build and run
 
-Requirements: CMake ≥ 3.25, a C++20 compiler (GCC ≥ 13 or Clang ≥ 17), and network access on
-the first configure (FetchContent downloads yaml-cpp and GoogleTest).
+Requirements: CMake ≥ 3.25, a C++20 compiler (GCC ≥ 13 or Clang ≥ 17), NASM (assembles the
+test ROMs; `apt install nasm` / `brew install nasm`), and network access on the first configure
+(FetchContent downloads yaml-cpp and GoogleTest).
 
 ```bash
 ./regress                  # configure + build + unit tests + test matrix + baseline diff
@@ -67,7 +70,8 @@ libs/spec/       loader, validator, expressions        L1
 libs/model/      behavioral/, fault/, die profiles     L2
 libs/tester/     Tester API, sim/, electrical/         L3
 libs/golden/     independent instruction emulator      L4
-testprog/        include/, src/ (registry, runner), cases/A..E, roms/, patterns/, report/, cli/
+testprog/        include/, src/ (registry, runner, ROM harness, protocol checker), cases/A..E,
+                 roms/ (NASM test ROMs), patterns/ (.pat), report/, cli/
 regression/      expected.yaml, baselines/
 docs/            design, brief, decisions
 ```
