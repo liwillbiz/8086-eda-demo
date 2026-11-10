@@ -38,3 +38,16 @@ interface choices M0 had to make where the design doc only sketched them.
 - **Pin names** use the minimum-mode name with `_N` for active-low pins (`RD_N`, `M_IO_N`). Pin 20 is `GND2` so that names stay unique.
 - **Baselines:** `./regress` diffs `out/good/results.csv` against `regression/baselines/good_results.csv`. It is header-only until test cases exist; shmoo baselines come in M6.
 - **Interface change policy:** the headers under `libs/*/include` and `testprog/include` are frozen. Additive changes are fine through a PR reviewed by the Spec & Integration lead and the owner of that header (enforced by CODEOWNERS). Breaking changes need every affected owner.
+
+## M1 spec choices
+
+- **No frozen header changed.** `spec.hpp` is identical to M0; everything new lives behind `Spec::Impl`.
+- **Expressions** support `+ - * /`, parentheses, numbers, and variables. AC bounds may use `TCLCL` (the period passed to `Spec::ac()`) and `SYM.min` / `SYM.max` of another AC parameter at the same grade and period (for example `TLHLL = TCLCH.min - 20`). A limit that references an unverified limit is itself reported as unverified. `Spec::ac("TCLCL", …)` returns the `grades` range, so TCLCL is not duplicated under `ac`.
+- **`Spec::ac()` evaluates at any positive period**, including periods outside the grade's range, because the shmoo sweeps below the grade minimum.
+- **VCC-relative DC limits** (`VIH max = VCC + 0.5`, `VCH max = VCC + 1.0`): `Spec::dc(sym, Grade)` has no VCC argument, so it returns the bound that holds over the whole `conditions.VCC` range (a max takes its smallest value, a min its largest). Today that gives VIH max = 5.0 V and VCH max = 5.5 V. If M6 needs the limit at the actual test VCC, add an overload `dc(sym, Grade, double vcc_v)`; the expressions are already stored.
+- **`conditions`** (VCC, TA, AC test levels and load) are loaded and validated, and VCC drives the DC evaluation above. There is no public accessor yet; M4/M6 can add `Limit condition(std::string_view) const` additively if the tester needs them.
+- **`dc.*.cond`** (for example `IOL_mA: 2.5`) is validated but not exposed through `Limit`.
+- **Decode tables** hold stable identifiers (`int_ack`, `mem_read`, `CS_or_none`, `high_byte`, …), not prose, so the protocol checker can compare strings.
+- **`verified: false`** marks every value the brief flags "(verify)": the whole of brief §6.1 and §6.2 (and the VCC/TA conditions they share), the clock measurement levels in the AC test conditions, and the individual §4.2 cells (8086-1 TDVCL, TCLAV, TCLRL, TCLRH; 8086-2/-1 TCHRYX and TINVCH). The 8086-1 TCLRL/TCLRH cells have no value in the brief; they carry the 8086-2 values as placeholders until X1.
+- **8086-1 TCLCH and TCHCL** are the fixed 53 ns and 39 ns the brief prints, not the formula (which would give 51.7 ns and 35.3 ns at 100 ns). The 8086 and 8086-2 columns use the formula.
+- **Validation is strict**: unknown or duplicate keys, missing `ref`/`verified`, unknown units, bad expressions, unknown variables or references, reference cycles, min > max at either end of a grade's clock range, incomplete decode tables, and pin-table errors all fail `Spec::load` with `file:line`. `libs/spec/tests/validation_test.cpp` covers each rule by mutating the real `spec.yaml`.

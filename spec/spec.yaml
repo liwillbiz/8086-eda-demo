@@ -1,6 +1,7 @@
 # i8086 datasheet limits — single source of truth for every layer.
-# Owner: Spec & Integration lead. M0 skeleton: device, grades, pins.
-# M1 adds ac, dc, abs_max, conditions, decode (design doc §3.1).
+# Owner: Spec & Integration lead. Design doc §3.1; values from the reference brief.
+# libs/spec validates this file strictly at load time (unknown keys, missing provenance,
+# bad expressions and min > max are all errors with file:line).
 # Provenance: every entry carries `ref`; values from the brief marked "(verify)"
 # carry `verified: false` until task X1 checks them against Intel DS 231455-006.
 schema_version: 1
@@ -55,6 +56,182 @@ pins:
   - { num: 39, name: AD15,   dir: io,  tristate: true, bus: AD, bit: 15, ref: "DS §Pin Description", verified: true }
   - { num: 40, name: VCC,    dir: pwr, ref: "DS §Pin Description", verified: true }
 
-ac: {}
-dc: {}
-abs_max: {}
+
+# Operating and test conditions (brief §4.2 header, §4.2 "AC test conditions", §6.2 header).
+# Each entry has min/max or a single `value`. Numbers only.
+conditions:
+  VCC:       { min: 4.5, max: 5.5, unit: V,  desc: "Supply voltage (5 V ±10%)", ref: "DS §D.C. Characteristics", verified: false }
+  TA:        { min: 0,   max: 70,  unit: C,  desc: "Ambient temperature", ref: "DS §D.C. Characteristics", verified: false }
+  AC_VIL:    { value: 0.45, unit: V, desc: "AC test input drive low", ref: "DS §A.C. Testing Input, Output Waveform", verified: true }
+  AC_VIH:    { value: 2.4,  unit: V, desc: "AC test input drive high", ref: "DS §A.C. Testing Input, Output Waveform", verified: true }
+  AC_VREF:   { value: 1.5,  unit: V, desc: "AC timing measurement level", ref: "DS §A.C. Testing Input, Output Waveform", verified: true }
+  AC_CL:     { min: 20, max: 100, unit: pF, desc: "AC test output load", ref: "DS §A.C. Testing Input, Output Waveform", verified: true }
+  AC_CLK_VL: { value: 0.6, unit: V, desc: "CLK timing measured low level", ref: "DS §A.C. Testing Input, Output Waveform", verified: false }
+  AC_CLK_VH: { value: 3.9, unit: V, desc: "CLK timing measured high level", ref: "DS §A.C. Testing Input, Output Waveform", verified: false }
+
+# Brief §4.2, minimum mode. Per-grade blocks inherit `ref`/`verified` from their parameter.
+# A bound is a number or an expression evaluated at the test clock period:
+#   TCLCL      the clock period passed to Spec::ac()
+#   SYM.min    another AC parameter's evaluated bound (same grade, same TCLCL)
+# TCLCL itself is not listed here: Spec::ac("TCLCL") returns the `grades` range.
+ac:
+  TCLCH:
+    desc: "CLK low time"
+    unit: ns
+    ref: "DS §A.C. Characteristics"
+    verified: true
+    note: "8086-1 is a fixed 53 ns in the brief; the formula would give 51.7 ns at 100 ns"
+    "8086":   { min: "2/3*TCLCL-15" }
+    "8086-2": { min: "2/3*TCLCL-15" }
+    "8086-1": { min: 53 }
+  TCHCL:
+    desc: "CLK high time"
+    unit: ns
+    ref: "DS §A.C. Characteristics"
+    verified: true
+    note: "8086-1 is a fixed 39 ns in the brief; the formula would give 35.3 ns at 100 ns"
+    "8086":   { min: "1/3*TCLCL+2" }
+    "8086-2": { min: "1/3*TCLCL+2" }
+    "8086-1": { min: 39 }
+  TCH1CH2: { desc: "CLK rise time (1.0 to 3.5 V)", unit: ns, max: 10, ref: "DS §A.C. Characteristics", verified: true }
+  TCL2CL1: { desc: "CLK fall time (3.5 to 1.0 V)", unit: ns, max: 10, ref: "DS §A.C. Characteristics", verified: true }
+  TDVCL:
+    desc: "Data-in setup to CLK"
+    unit: ns
+    ref: "DS §A.C. Characteristics"
+    verified: true
+    "8086":   { min: 30 }
+    "8086-2": { min: 20 }
+    "8086-1": { min: 5, verified: false }
+  TCLDX: { desc: "Data-in hold after CLK", unit: ns, min: 10, ref: "DS §A.C. Characteristics", verified: true }
+  TRYHCH: { desc: "READY setup into 8086", unit: ns, min: "2/3*TCLCL-15", ref: "DS §A.C. Characteristics", verified: true }
+  TCHRYX:
+    desc: "READY hold into 8086"
+    unit: ns
+    ref: "DS §A.C. Characteristics"
+    verified: true
+    "8086":   { min: 30 }
+    "8086-2": { min: 20, verified: false }
+    "8086-1": { min: 20, verified: false }
+  TINVCH:
+    desc: "INTR, NMI, TEST# setup to CLK"
+    unit: ns
+    ref: "DS §A.C. Characteristics"
+    verified: true
+    "8086":   { min: 30 }
+    "8086-2": { min: 15, verified: false }
+    "8086-1": { min: 15, verified: false }
+  TCLAV:
+    desc: "Address valid delay"
+    unit: ns
+    ref: "DS §A.C. Characteristics"
+    verified: true
+    "8086":   { min: 10, max: 110 }
+    "8086-2": { min: 10, max: 60 }
+    "8086-1": { min: 10, max: 50, verified: false }
+  TLHLL:
+    desc: "ALE width"
+    unit: ns
+    ref: "DS §A.C. Characteristics"
+    verified: true
+    "8086":   { min: "TCLCH.min-20" }
+    "8086-2": { min: "TCLCH.min-10" }
+    "8086-1": { min: "TCLCH.min-10" }
+  TCLRL:
+    desc: "RD# active delay"
+    unit: ns
+    ref: "DS §A.C. Characteristics"
+    verified: true
+    "8086":   { min: 10, max: 165 }
+    "8086-2": { min: 10, max: 100 }
+    "8086-1": { min: 10, max: 100, verified: false, note: "brief gives no 8086-1 value; placeholder copies 8086-2 until X1" }
+  TCLRH:
+    desc: "RD# inactive delay"
+    unit: ns
+    ref: "DS §A.C. Characteristics"
+    verified: true
+    "8086":   { min: 10, max: 150 }
+    "8086-2": { min: 10, max: 80 }
+    "8086-1": { min: 10, max: 80, verified: false, note: "brief gives no 8086-1 value; placeholder copies 8086-2 until X1" }
+  TRLRH:
+    desc: "RD# width"
+    unit: ns
+    ref: "DS §A.C. Characteristics"
+    verified: true
+    "8086":   { min: "2*TCLCL-75" }
+    "8086-2": { min: "2*TCLCL-50" }
+    "8086-1": { min: "2*TCLCL-40" }
+  TWLWH:
+    desc: "WR# width"
+    unit: ns
+    ref: "DS §A.C. Characteristics"
+    verified: true
+    "8086":   { min: "2*TCLCL-60" }
+    "8086-2": { min: "2*TCLCL-40" }
+    "8086-1": { min: "2*TCLCL-35" }
+  TRHAV:
+    desc: "RD# inactive to next address active"
+    unit: ns
+    ref: "DS §A.C. Characteristics"
+    verified: true
+    "8086":   { min: "TCLCL-45" }
+    "8086-2": { min: "TCLCL-40" }
+    "8086-1": { min: "TCLCL-35" }
+  TOLOH: { desc: "Output rise time", unit: ns, max: 20, ref: "DS §A.C. Characteristics", verified: true }
+  TOHOL: { desc: "Output fall time", unit: ns, max: 12, ref: "DS §A.C. Characteristics", verified: true }
+
+# Brief §6.2, TA 0–70 °C, VCC 5 V ±10%. The whole table is marked "(verify)".
+# Bounds may use VCC; Spec::dc() returns the tightest value over conditions.VCC.
+# `cond` records the measurement condition for the tester (M6); the loader keeps it as text.
+dc:
+  VIL: { desc: "Input low voltage",  unit: V, min: -0.5, max: 0.8, ref: "DS §D.C. Characteristics", verified: false }
+  VIH: { desc: "Input high voltage", unit: V, min: 2.0, max: "VCC+0.5", ref: "DS §D.C. Characteristics", verified: false }
+  VOL: { desc: "Output low voltage",  unit: V, max: 0.45, cond: { IOL_mA: 2.5 }, ref: "DS §D.C. Characteristics", verified: false }
+  VOH: { desc: "Output high voltage", unit: V, min: 2.4, cond: { IOH_uA: -400 }, ref: "DS §D.C. Characteristics", verified: false }
+  ICC:
+    desc: "Supply current"
+    unit: mA
+    cond: { TA_C: 25 }
+    ref: "DS §D.C. Characteristics"
+    verified: false
+    "8086":   { max: 340 }
+    "8086-2": { max: 350 }
+    "8086-1": { max: 360 }
+  ILI: { desc: "Input leakage current",  unit: uA, min: -10, max: 10, cond: { VIN: "0 V to VCC" }, ref: "DS §D.C. Characteristics", verified: false }
+  ILO: { desc: "Output leakage current", unit: uA, min: -10, max: 10, cond: { VOUT: "0.45 V to VCC" }, ref: "DS §D.C. Characteristics", verified: false }
+  VCL: { desc: "CLK input low voltage",  unit: V, min: -0.5, max: 0.6, ref: "DS §D.C. Characteristics", verified: false }
+  VCH: { desc: "CLK input high voltage", unit: V, min: 3.9, max: "VCC+1.0", ref: "DS §D.C. Characteristics", verified: false }
+  CIN: { desc: "Input capacitance", unit: pF, max: 15, cond: { fc_MHz: 1 }, ref: "DS §D.C. Characteristics", verified: false }
+  CIO: { desc: "I/O capacitance",   unit: pF, max: 15, cond: { fc_MHz: 1 }, ref: "DS §D.C. Characteristics", verified: false }
+
+# Brief §6.1, marked "(verify)". Numbers only. The tester refuses levels beyond these.
+abs_max:
+  TA_BIAS: { desc: "Ambient temperature under bias", unit: C, min: 0,   max: 70,  ref: "DS §Absolute Maximum Ratings", verified: false }
+  TSTG:    { desc: "Storage temperature",            unit: C, min: -65, max: 150, ref: "DS §Absolute Maximum Ratings", verified: false }
+  V_PIN:   { desc: "Voltage on any pin vs GND",      unit: V, min: -1.0, max: 7.0, ref: "DS §Absolute Maximum Ratings", verified: false }
+  PD:      { desc: "Power dissipation",              unit: W, max: 2.5, ref: "DS §Absolute Maximum Ratings", verified: false }
+
+# Brief §3.3. Keys are the pin bits MSB-first; every combination must be present.
+# Values are stable identifiers for the protocol checker.
+decode:
+  status:
+    bits: [S2_N, S1_N, S0_N]
+    ref: "DS §Pin Description"
+    verified: true
+    table: { "000": int_ack, "001": io_read, "010": io_write, "011": halt,
+             "100": code, "101": mem_read, "110": mem_write, "111": passive }
+  segment:
+    bits: [S4, S3]
+    ref: "DS §Pin Description"
+    verified: true
+    table: { "00": ES, "01": SS, "10": CS_or_none, "11": DS }
+  queue:
+    bits: [QS1, QS0]
+    ref: "DS §Pin Description"
+    verified: true
+    table: { "00": nop, "01": first_byte, "10": empty, "11": subsequent }
+  byte_enable:
+    bits: [BHE_N, A0]
+    ref: "DS §Pin Description"
+    verified: true
+    table: { "00": word, "01": high_byte, "10": low_byte, "11": none }
