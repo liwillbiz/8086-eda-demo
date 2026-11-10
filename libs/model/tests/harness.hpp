@@ -2,7 +2,9 @@
 
 // Minimal memory-emulation driver for white-box model tests: it acts as the system's
 // memory, I/O and READY logic and decodes bus cycles from the pins, like a tester would.
-// One CLK = falling edge (starts a T-state) then rising edge.
+// One CLK = falling edge (starts a T-state) then rising edge. Like SimTester (M4), every
+// input is reported at every edge with its value strictly before the edge and the
+// absolute time of its last change minus the edge time.
 
 #include <cstdint>
 #include <map>
@@ -46,10 +48,11 @@ class Harness {
   std::vector<EdgeLog> log;
 
   // Stimulus knobs.
+  double clk_high_ns = 0;               // 0 = TCLCL/3
   int wait_states = 0;
-  int64_t data_changed_ps = -1'000'000;  // read data change time before the latching edge
-  int64_t data_release_ps = 20'000;      // read data released this long after the latching edge
-  int64_t ready_changed_ps = -1'000'000; // READY low→high change time before the sampling edge
+  int64_t data_changed_ps = -50'000;    // read data change time relative to the latching edge
+  int64_t data_release_ps = 20'000;     // read data released this long after the latching edge
+  int64_t ready_changed_ps = -40'000;   // READY low→high change time relative to the sampling edge
   std::map<std::string, Logic> force;    // extra static inputs (e.g. MN_MX_N)
 
   int pin(const std::string& name) const { return spec.pin(name).num; }
@@ -68,17 +71,25 @@ class Harness {
 
  private:
   void edge(Edge e);
-  std::vector<InputSample> inputs_for(Edge next);
+  std::vector<InputSample> inputs_for(Edge next, int64_t edge_t);
+  void set(int pin, Logic v, int64_t t);
   uint16_t read_word(const BusState& b) const;
   uint16_t ad_levels() const;
 
   std::map<int, Logic> levels_;
+  struct Drive {
+    Logic v;
+    int64_t t;  // absolute ps of the last change
+  };
+  std::map<int, Drive> drive_;
+  int64_t period_ps_ = 0, high_ps_ = 0;
+  uint64_t periods_ = 0;
+  int64_t last_edge_t_ = 0;
+  int64_t latch_t_ = 0;
   bool reset_high_ = false;
-  bool reset_changed_ = false;
   TState state_ = TState::Ti;  // after the last falling edge
   bool latch_pending_ = false; // READY given high in T3/Tw: next falling edge latches data
   bool release_pending_ = false;
-  bool ready_was_low_ = false;
   int tw_ = 0;
   uint16_t drive_data_ = 0;
   uint32_t ale_addr_ = 0;

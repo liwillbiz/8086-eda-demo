@@ -1,5 +1,6 @@
 // Bus interface unit: T-states, pin events, input sampling, prefetch queue.
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <stdexcept>
@@ -11,6 +12,7 @@ namespace i8086::model::detail {
 namespace {
 
 constexpr int64_t kStable = std::numeric_limits<int64_t>::min() / 4;
+constexpr int64_t kUnset = std::numeric_limits<int64_t>::min();
 constexpr std::size_t kQueueSize = 6;
 // Brief §5: the first fetch at FFFF0h starts about 7 CLK after RESET falls. RESET is
 // sampled on a rising edge, 2/3 CLK after the 8284A drops it on a falling edge.
@@ -80,7 +82,15 @@ PinMap PinMap::from(const spec::Spec& spec) {
 }
 
 Core::Core(const spec::Spec& spec, const DieProfile& die, FaultSet logic_faults)
-    : pins_(PinMap::from(spec)), timing_(DieTiming::from(die)) {
+    : pins_(PinMap::from(spec)), nominal_(DieTiming::from(die)), timing_(nominal_) {
+  // Same keys, defaults and formula as tester::ElectricalModel::derate (design doc §5.2);
+  // the tester derates the output delays, the model derates its own input windows.
+  auto get = [&](const char* key, double fallback) {
+    const auto it = die.electrical.find(key);
+    return it == die.electrical.end() ? fallback : it->second;
+  };
+  derate_ = Derate{get("derate_vnom_v", 5.0), get("derate_vt_v", 1.0), get("derate_alpha", 0.0),
+                   get("derate_beta_per_c", 0.0)};
   for (const LogicBug* b : logic_faults.all<LogicBug>()) {
     if (b->name == "inc_clears_cf") {
       bug_inc_clears_cf_ = true;
@@ -92,6 +102,7 @@ Core::Core(const spec::Spec& spec, const DieProfile& die, FaultSet logic_faults)
   }
   const auto n = static_cast<std::size_t>(pins_.max_pin + 1);
   in_.assign(n, In{Logic::L0, kStable});
+  raw_.assign(n, In{Logic::Z, kUnset});
   for (int p : pins_.ad) in_[static_cast<std::size_t>(p)].v = Logic::Z;
   in_[static_cast<std::size_t>(pins_.ready)].v = Logic::L1;
   in_[static_cast<std::size_t>(pins_.mn_mx_n)].v = Logic::L1;
@@ -135,11 +146,32 @@ void Core::watch_hold(int pin, Logic* slot, int64_t hold_ps) {
   watches_.push_back(HoldWatch{pin, in_[static_cast<std::size_t>(pin)].v, slot, hold_ps});
 }
 
-// The model does not see the tester's duty cycle; it assumes the spec's 33% CLK
-// (low 2/3, high 1/3) when converting a change time into "time after the last edge".
-int64_t Core::half_period_ps(Edge after) const {
+void Core::set_conditions(const Conditions& c) {
+  double k = 1.0 + derate_.beta_per_c * (c.temp_c - 25.0);
+  if (derate_.alpha != 0.0) {
+    if (c.vcc_v <= derate_.vt_v) {
+      throw std::domain_error("behavioral model: VCC " + std::to_string(c.vcc_v) +
+                              " V is at or below the die's Vt");
+    }
+    k *= std::pow((derate_.vnom_v - derate_.vt_v) / (c.vcc_v - derate_.vt_v), derate_.alpha);
+  }
+  if (!(k > 0)) throw std::domain_error("behavioral model: non-positive derating factor");
+  auto scaled = [k](int64_t ps) { return static_cast<int64_t>(std::llround(static_cast<double>(ps) * k)); };
+  timing_.tdvcl = scaled(nominal_.tdvcl);
+  timing_.tcldx = scaled(nominal_.tcldx);
+  timing_.tryhch = scaled(nominal_.tryhch);
+  timing_.tchryx = scaled(nominal_.tchryx);
+  timing_.tinvch = scaled(nominal_.tinvch);
+  conditions_ = c;
+}
+
+// Time from the last edge to the upcoming one. A tester that reports every pin's change
+// time at every edge reveals it exactly (an unchanged pin's changed_ps moves by the gap);
+// otherwise the model assumes the spec's 33% CLK (low 2/3, high 1/3).
+int64_t Core::edge_gap_ps() const {
+  if (measured_gap_ps_ > 0) return measured_gap_ps_;
   const double t = conditions_.tclcl_ns * 1000.0;
-  return static_cast<int64_t>(std::llround(after == Edge::Falling ? t * 2.0 / 3.0 : t / 3.0));
+  return static_cast<int64_t>(std::llround(last_edge_ == Edge::Falling ? t * 2.0 / 3.0 : t / 3.0));
 }
 
 void Core::set_inputs(std::span<const InputSample> samples) {
@@ -147,12 +179,22 @@ void Core::set_inputs(std::span<const InputSample> samples) {
     if (s.pin <= 0 || s.pin > pins_.max_pin) {
       throw std::out_of_range("set_inputs: pin " + std::to_string(s.pin));
     }
+    // A pin that changed and changed back since the last edge shows a smaller gap; take the max.
+    const In& raw = raw_[static_cast<std::size_t>(s.pin)];
+    if (raw.changed_ps == kUnset || raw.v != s.value || s.changed_ps <= kStable) continue;
+    const int64_t gap = raw.changed_ps - s.changed_ps;
+    if (gap > 0 && gap < static_cast<int64_t>(conditions_.tclcl_ns * 1000.0)) {
+      measured_gap_ps_ = std::max(measured_gap_ps_, gap);
+    }
+  }
+  for (const InputSample& s : samples) {
     for (const HoldWatch& w : watches_) {
       if (w.pin != s.pin || s.value == w.driven) continue;
-      const int64_t after_edge = s.changed_ps + half_period_ps(last_edge_);
+      const int64_t after_edge = s.changed_ps + edge_gap_ps();
       if (after_edge >= 0 && after_edge < w.hold_ps) *w.slot = Logic::X;
     }
     in_[static_cast<std::size_t>(s.pin)] = In{s.value, s.changed_ps};
+    raw_[static_cast<std::size_t>(s.pin)] = In{s.value, s.changed_ps};
   }
 }
 
@@ -175,6 +217,7 @@ std::vector<PinEvent> Core::clock_edge(Edge e) {
     on_falling();
   }
   last_edge_ = e;
+  measured_gap_ps_ = 0;
   for (In& i : in_) i.changed_ps = kStable;
   return std::move(events_);
 }

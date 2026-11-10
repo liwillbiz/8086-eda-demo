@@ -85,7 +85,7 @@ class Core final : public DeviceModel {
   Core(const spec::Spec&, const DieProfile&, FaultSet logic_faults);
   ~Core() override;
 
-  void set_conditions(const Conditions& c) override { conditions_ = c; }
+  void set_conditions(const Conditions&) override;
   void set_inputs(std::span<const InputSample>) override;
   std::vector<PinEvent> clock_edge(Edge) override;
   ArchState arch_state() const override;
@@ -129,7 +129,7 @@ class Core final : public DeviceModel {
   void drive_a(uint8_t nibble, int64_t delay_ps);
   Logic sample(int pin, int64_t setup_ps) const;
   void watch_hold(int pin, Logic* slot, int64_t hold_ps);
-  int64_t half_period_ps(Edge after) const;
+  int64_t edge_gap_ps() const;
 
   void on_rising();
   void on_falling();
@@ -191,7 +191,11 @@ class Core final : public DeviceModel {
 
   // ---- configuration ----
   PinMap pins_;
-  DieTiming timing_;
+  DieTiming nominal_;
+  DieTiming timing_;  // nominal output delays; setup/hold windows derated to conditions_
+  struct Derate {
+    double vnom_v, vt_v, alpha, beta_per_c;
+  } derate_{};
   bool bug_inc_clears_cf_ = false;
   bool bug_shift_count_masked_ = false;
   Conditions conditions_;
@@ -202,6 +206,8 @@ class Core final : public DeviceModel {
     int64_t changed_ps = 0;
   };
   std::vector<In> in_;
+  std::vector<In> raw_;          // last sample as given, to measure the spacing between edges
+  int64_t measured_gap_ps_ = 0;  // last edge → upcoming edge, 0 = not measured
   struct HoldWatch {
     int pin;
     Logic driven;
