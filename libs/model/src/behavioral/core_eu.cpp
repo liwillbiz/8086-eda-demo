@@ -171,7 +171,12 @@ uint16_t Core::inc_dec(uint16_t a16, bool dec, bool word) {
   const uint32_t sign = word ? 0x8000 : 0x80;
   const uint32_t a = a16 & mask;
   const uint32_t r = (dec ? a - 1 : a + 1) & mask;
-  set_flag(kOF, dec ? a == sign : r == sign);
+  if (dec) {
+    set_flag(kOF, a == sign);
+  } else {  // same flag rules as ADD with b = 1
+    set_flag(kCF, r > mask);
+    set_flag(kOF, ((a ^ r) & (1 ^ r) & sign) != 0);
+  }
   set_flag(kAF, ((a ^ 1 ^ r) & 0x10) != 0);
   set_szp(u16(r), word);
   if (!dec && bug_inc_clears_cf_) set_flag(kCF, false);
