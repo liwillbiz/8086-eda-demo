@@ -102,7 +102,7 @@ ac:
     verified: true
     "8086":   { min: 30 }
     "8086-2": { min: 20 }
-    "8086-1": { min: 5, verified: false }
+    "8086-1": { min: 5 }
   TCLDX: { desc: "Data-in hold after CLK", unit: ns, min: 10, ref: "DS §A.C. Characteristics", verified: true }
   TRYHCH: { desc: "READY setup into 8086", unit: ns, min: "2/3*TCLCL-15", ref: "DS §A.C. Characteristics", verified: true }
   TCHRYX:
