@@ -210,3 +210,23 @@ interface choices M0 had to make where the design doc only sketched them.
   - The golden inhibits the TF trap after any segment-register load (M2). The model and brief §Interrupts inhibit only after MOV SS and POP SS. No current ROM steps over a DS, ES or CS load with TF set, so nothing fails yet. For external interrupts, the golden now follows the brief.
   - The tester's halt-stop rule needs wake-up stimuli at least 3 CLKs after the halt. An INTR that is never acknowledged (IF = 0) runs to `max_cycles`.
   - `functional_suite()` (C6, B-margins) does not include the M8 ROMs. D10 could join without stimuli; the others need `RunOpts::stimuli`.
+
+## M10 demo choices
+
+- **The risky change** is kept as two patches in `demo/patches/risky-speedup/` and applied by `demo/demo.sh branch risky`. The prepared branch `cursor/demo-risky-speedup-a334` carries the same two commits.
+  - **"Speed up reads"** releases RD# TCLDX (4 ns) after the T3→T4 edge instead of TCLRH (35 ns), on the grounds that the data is already latched. B5 then measures TRLRH = 153.8 ns at 8086-1, 4.5 V, 70 °C and 159.0 ns at 0 °C, against a minimum of 160 ns (2·TCLCL − 40). Every other point passes, including all of 8086 and 8086-2. Reads still work, so only the timing check sees it.
+  - A literal half-clock-earlier RD# (on the T3 rising edge) was rejected: the tester's memory stops driving data once RD# rises, so every program read garbage before the latch and all tests failed.
+  - **"Simplify INC"** copies ADD's carry line, `set_flag(kCF, r > mask)`, into `inc_dec`. `r` is already masked there, so INC always clears CF. D2 (`STC; INC 0FFFFh`) reports `CF_after_STC_INC` = 0 where 1 is expected, and `golden_mismatches` shows golden OUT 57h vs DUT OUT 56h. C6 fails because its suite includes the D2 ROM. An INC routed through `alu(ADD, a, 1)` was rejected because D2's operand 0FFFFh carries anyway, so D2 would still pass.
+  - The shmoo runs the functional suite, which includes D2's ROM. The INC bug therefore fails every cell inside the spec boxes (45 cells), not just low VCC. The RD# change does not show in the shmoo because the shmoo has no timing checks. With only the RD# change left, the shmoo is green and only B5 fails.
+  - Unit tests also catch both changes: BusCycle strobe delays, SlowTiming, D2_IncPreservesCarry, DifferentialFuzz, and the die-margin checks.
+- **Spec fix.** `demo/demo.sh branch spec-fix [--value NS]` edits only the 8086-1 TDVCL line in `spec/spec.yaml`. It drops `verified: false` and optionally sets the datasheet number.
+  - Regress stays green for 5.0–5.9 ns.
+  - Below 5.0 ns, the marginal die (4.8 ns worst case) fails its in-spec unit check.
+  - At about 6.0 ns or more, the out-of-spec die for B3 in `margin_test` (6.0 ns worst case) stops failing.
+  - The spec unit test no longer pins the 8086-1 TDVCL value or its verified flag, which wait on X1.
+- **Regress for a live audience.**
+  - The matrix runs on a thread pool (`I86_JOBS`, default one per core). Output is byte-identical to a serial run. The good-die matrix drops from 44 s to about 6 s on 8 cores.
+  - A unit-test failure no longer stops the run, so the matrix, coverage and shmoo still report what a change broke.
+  - The baseline diff is capped at 40 lines, and `out/summary.md` ends with `**regress: FAIL** in: …`.
+  - CI uses ccache with an `actions/cache` entry per job. GitHub restores caches only from the PR's own ref, its base branch, or the default branch, so the workflow also has a `workflow_dispatch` trigger to warm the cache on a demo base branch.
+- **Stuck pin.** `i86test --coverage … --only DIE` runs the coverage check for the named dies only. `demo/demo.sh stuck-pin` runs `fault_stuck_ad3` at the regress grid in under a second.
