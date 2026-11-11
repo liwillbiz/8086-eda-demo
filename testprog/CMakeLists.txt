@@ -62,6 +62,7 @@ add_library(i86testprog
   src/margin.cpp
   src/shmoo.cpp
   src/coverage.cpp
+  src/interrupts.cpp
   report/datalog.cpp
   report/summary.cpp
   report/shmoo.cpp

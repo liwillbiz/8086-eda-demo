@@ -29,6 +29,8 @@ class RomCase : public TestCase {
 
  protected:
   virtual std::string_view rom_name() const = 0;
+  // The DUT and golden runs; tests with interrupt stimuli override it.
+  virtual RomRun execute(TestContext& ctx) { return run_rom(ctx, rom_name()); }
   virtual DiffOptions diff_options() const { return {}; }
   // Checks written from the brief, independent of the golden emulator (design doc §14).
   virtual Verdict brief_checks(TestContext&, const RomRun&) = 0;

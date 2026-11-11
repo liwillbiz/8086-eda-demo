@@ -163,6 +163,18 @@ TEST(Golden, MaskedIntrWaitsForSti) {
   EXPECT_EQ(r.regs.ax, 0x0106);
 }
 
+TEST(Golden, MovSsShadowsInterruptsButMovDsDoesNot) {
+  // MOV SP,1000h; XOR AX,AX; MOV SS,AX / MOV DS,AX; NOP (index 4, at 0107h); NOP
+  auto stacked_ip = [](uint8_t sreg_modrm) {
+    Program p = boot({0xBC, 0x00, 0x10, 0x31, 0xC0, 0x8E, sreg_modrm, 0x90, 0x90});
+    add_handler(p, 2, 0x0200, {0x58, 0xF4});
+    p.interrupts.push_back({.instruction_index = 4, .nmi = true});
+    return run(p).regs.ax;
+  };
+  EXPECT_EQ(stacked_ip(0xD0), 0x0108);  // MOV SS,AX: the NOP after it runs first
+  EXPECT_EQ(stacked_ip(0xD8), 0x0107);
+}
+
 TEST(Golden, NmiDuringHaltResumesAfterHlt) {
   // MOV SP,1000h; HLT; INC BX; (HLT)
   Program p = boot({0xBC, 0x00, 0x10, 0xF4, 0x43});

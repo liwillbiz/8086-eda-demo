@@ -1,5 +1,6 @@
-// The M5 test cases (A1-A3, D1-D6, D8, D9, D11): registered, green on the good die, and
-// able to catch the behavioral faults the design doc assigns to them (§4.2).
+// The M5 test cases (A1-A3, D1-D6, D8, D9, D11) and the M8 interrupt, HOLD and HLT cases
+// (A4-A7, D7, D10): registered, green on the good die, and the M5 ones able to catch the
+// behavioral faults the design doc assigns to them (§4.2).
 
 #include <gtest/gtest.h>
 
@@ -14,6 +15,7 @@ namespace i8086::testprog {
 namespace {
 
 const std::vector<std::string> kM5 = {"A1", "A2", "A3", "D1", "D2", "D3", "D4", "D5", "D6", "D8", "D9", "D11"};
+const std::vector<std::string> kM8 = {"A4", "A5", "A6", "A7", "D7", "D10"};
 
 struct Fixture {
   spec::Spec spec = spec::Spec::load(I86_SOURCE_DIR "/spec/spec.yaml");
@@ -46,6 +48,11 @@ TEST(Cases, M5SetIsRegistered) {
   for (const auto& id : kM5) EXPECT_NE(std::ranges::find(ids, id), ids.end()) << id;
 }
 
+TEST(Cases, M8SetIsRegistered) {
+  const auto ids = TestRegistry::global().ids();
+  for (const auto& id : kM8) EXPECT_NE(std::ranges::find(ids, id), ids.end()) << id;
+}
+
 TEST(Cases, AllPassOnGoodDieAcrossTheMatrix) {
   RunConfig cfg;
   cfg.spec_path = I86_SOURCE_DIR "/spec/spec.yaml";
@@ -53,10 +60,10 @@ TEST(Cases, AllPassOnGoodDieAcrossTheMatrix) {
   cfg.out_dir = std::filesystem::temp_directory_path() / "i86_cases_out";
   cfg.vcc_v = {4.5, 5.5};
   cfg.temp_c = {0, 70};
-  cfg.tests = "A1-A3,D*";
+  cfg.tests = "A*,D*";
   std::ostringstream console;
   const RunSummary s = run(cfg, TestRegistry::global(), console);
-  EXPECT_EQ(s.rows.size(), kM5.size() * 3 * 2 * 2);
+  EXPECT_EQ(s.rows.size(), (kM5.size() + kM8.size()) * 3 * 2 * 2);
   EXPECT_TRUE(s.ok()) << console.str();
   EXPECT_EQ(s.count(Verdict::Pass), static_cast<int>(s.rows.size())) << console.str();
 }

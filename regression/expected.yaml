@@ -11,25 +11,28 @@ waivers: []
 # that fails means the fault reaches further than we think. `./regress` step 3 checks it
 # and writes out/coverage.md.
 fault_coverage:
-  # Data pin: every program reads garbage. A1 (reset fetch) and the DC pin tests do not care.
-  fault_stuck_ad3: [A1, A2, A3, B1, B2, B3, B4, B5, C2, C5, C6, C7,
-                    D1, D2, D3, D4, D5, D6, D8, D9, D11]
+  # Data pin: every program reads garbage, the M8 interrupt ROMs included. A1 (reset
+  # fetch) and the DC pin tests do not care.
+  fault_stuck_ad3: [A1, A2, A3, A4, A5, A6, A7, B1, B2, B3, B4, B5, B6, C2, C5, C6, C7,
+                    D1, D2, D3, D4, D5, D6, D7, D8, D9, D10, D11]
   # Control pin: no write ever lands; A1 only fetches.
-  fault_stuck_wr_n: [A2, A3, B1, B2, B3, B4, B5, C2, C5, C6, C7,
-                     D1, D2, D3, D4, D5, D6, D8, D9, D11]
+  fault_stuck_wr_n: [A2, A3, A4, A5, A6, A7, B1, B2, B3, B4, B5, B6, C2, C5, C6, C7,
+                     D1, D2, D3, D4, D5, D6, D7, D8, D9, D10, D11]
   # RD# so late at 8086-1 that memory has already driven the bus: programs fetch garbage
   # there (C1 errors while setting up its levels); at 8086-2 only B5 (TRLRH) sees it.
-  fault_slow_rd: [A1, A2, A3, B1, B2, B3, B4, B5, C1, C2, C5, C6, C7,
-                  D1, D2, D3, D4, D5, D6, D8, D9, D11]
+  fault_slow_rd: [A1, A2, A3, A4, A5, A6, A7, B1, B2, B3, B4, B5, B6, C1, C2, C5, C6, C7,
+                  D1, D2, D3, D4, D5, D6, D7, D8, D9, D10, D11]
   # Slow corner (outputs and the internal path x1.6): B5 sees TCLAV; at 4.5 V the 8086-1 and
   # 8086-2 run past Fmax (B1) and every program that writes fails.
-  fault_slow_all: [A1, A2, A3, B1, B2, B3, B4, B5, C2, C5, C6, C7,
-                   D1, D2, D3, D4, D5, D6, D8, D9, D11]
+  fault_slow_all: [A1, A2, A3, A4, A5, A6, A7, B1, B2, B3, B4, B5, B6, C2, C5, C6, C7,
+                   D1, D2, D3, D4, D5, D6, D7, D8, D9, D10, D11]
   fault_setup_data: [B3]
   fault_setup_ready: [B4]
+  # INTR, NMI and HOLD setup (M8): only B6 places them near a CLK edge.
+  fault_setup_intr: [B6]
   # Wrong results at 4.5 V only: every program fails there; A1, C1, C3, C4 run no program.
-  fault_lowvcc: [A2, A3, B1, B2, B3, B4, B5, C2, C5, C6, C7,
-                 D1, D2, D3, D4, D5, D6, D8, D9, D11]
+  fault_lowvcc: [A2, A3, A4, A5, A6, A7, B1, B2, B3, B4, B5, B6, C2, C5, C6, C7,
+                 D1, D2, D3, D4, D5, D6, D7, D8, D9, D10, D11]
   fault_leaky_ready: [C3]
   fault_leaky_ad5: [C4]
   # C6 runs the D-suite at the VCC corners, so it sees logic bugs too.

@@ -35,9 +35,10 @@ struct InterruptEntry {
 // External interrupt request (brief §5; M8, additive). It is pending from the boundary
 // before instruction `instruction_index` (the count of completed instructions) until it is
 // taken: NMI at the next boundary, INTR at the first boundary with IF = 1, NMI first. Taking
-// an INTR clears it (8259-style acknowledge). The boundary after STI, or after a load of a
-// segment register, takes none. A request not yet due when the CPU halts arrives during the
-// halt and ends it if it can be taken; kDuringHalt names that case.
+// an INTR clears it (8259-style acknowledge). The boundary after STI, MOV SS or POP SS takes
+// none. A REP string instruction is one instruction here, so a request that silicon takes
+// between iterations is placed at the REP's index. A request not yet due when the CPU
+// halts arrives during the halt and ends it if it can be taken; kDuringHalt names that case.
 struct InterruptRequest {
   static constexpr uint64_t kDuringHalt = ~uint64_t{0};
   uint64_t instruction_index = 0;

@@ -16,6 +16,12 @@ namespace {
 
 const std::vector<std::string> kM6 = {"B1", "B2", "B3", "B4", "B5", "C1",
                                       "C2", "C3", "C4", "C5", "C6", "C7"};
+// The margin tests judged at the worst corner: M6 plus B6 (M8).
+const std::vector<std::string> kMargin = [] {
+  auto v = kM6;
+  v.push_back("B6");
+  return v;
+}();
 
 const spec::Spec& the_spec() {
   static const spec::Spec s = spec::Spec::load(I86_SOURCE_DIR "/spec/spec.yaml");
@@ -49,7 +55,7 @@ class InSpecDie : public testing::TestWithParam<const char*> {};
 
 TEST_P(InSpecDie, EveryMarginTestPassesAtTheWorstCorner) {
   const model::DieProfile d = die(GetParam());
-  for (const auto& id : kM6) {
+  for (const auto& id : kMargin) {
     Datalog log("t");
     EXPECT_EQ(run_case(d, id, log), Verdict::Pass) << id << ": " << [&] {
       for (const auto& r : log.records()) {
@@ -90,6 +96,7 @@ INSTANTIATE_TEST_SUITE_P(
                     OutOfSpec{"long_data_setup", "timing.TDVCL", 4.5, "B3"},
                     OutOfSpec{"long_ready_setup", "timing.TRYHCH", 40, "B4"},
                     OutOfSpec{"slow_address", "timing.TCLAV", 37, "B5"},
+                    OutOfSpec{"long_int_setup", "timing.TINVCH", 12, "B6"},
                     OutOfSpec{"weak_pull_down", "vol_offset_v", 0.4, "C1"},
                     OutOfSpec{"high_input_threshold", "vin_threshold_v", 2.0, "C2"},
                     OutOfSpec{"leaky", "leak_ua", 12, "C3"},

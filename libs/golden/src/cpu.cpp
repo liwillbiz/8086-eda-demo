@@ -87,7 +87,6 @@ Cpu::Step Cpu::step() {
     return wake_from_halt() ? Step::Continue : Step::Halt;
   }
   execute(op);
-  if (inhibit_trap_) shadow_ = true;
   if (trap && !interrupted_ && !inhibit_trap_) interrupt(1);
   ++out_.instructions;
   return Step::Continue;
@@ -599,6 +598,7 @@ void Cpu::execute(uint8_t op) {
     case 0x07: case 0x0F: case 0x17: case 0x1F:  // 0F is POP CS on the 8086 (brief D11)
       s_[op >> 3] = pop();
       inhibit_trap_ = true;
+      if (op == 0x17) shadow_ = true;
       return;
     case 0x27:
     case 0x2F: {  // DAA / DAS
@@ -680,6 +680,7 @@ void Cpu::execute(uint8_t op) {
       const Operand o = modrm();
       s_[o.reg & 3] = lo16(read_op(o, true));
       inhibit_trap_ = true;
+      if ((o.reg & 3) == SS) shadow_ = true;
       return;
     }
     case 0x8F: {
