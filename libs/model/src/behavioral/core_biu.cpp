@@ -248,6 +248,10 @@ void Core::enter_reset() {
   set_flags_word(0);
   halted_ = false;
   intr_latched_ = false;
+  nmi_pending_ = false;
+  shadow_ = false;
+  hold_req_ = false;
+  holding_ = false;
 
   const int64_t d = timing_.tclaz;
   float_ad(d);
@@ -287,9 +291,12 @@ void Core::on_rising() {
   if (in_[static_cast<std::size_t>(pins_.mn_mx_n)].v == Logic::L0) {
     throw NotImplemented("maximum mode (MN/MX# = 0) [M9]");
   }
-  if (sample(pins_.hold, timing_.tinvch) == Logic::L1) throw NotImplemented("HOLD/HLDA [M8]");
+  // A sample inside the setup window reads X: HOLD keeps its last state, NMI sees no edge
+  // and INTR no request until the next edge.
+  const Logic hold = sample(pins_.hold, timing_.tinvch);
+  if (is_level(hold)) hold_req_ = hold == Logic::L1;
   const Logic nmi = sample(pins_.nmi, timing_.tinvch);
-  if (nmi_prev_ == Logic::L0 && nmi == Logic::L1) throw NotImplemented("NMI [M8]");
+  if (nmi_prev_ == Logic::L0 && nmi == Logic::L1) nmi_pending_ = true;
   if (is_level(nmi)) nmi_prev_ = nmi;
   intr_latched_ = sample(pins_.intr, timing_.tinvch) == Logic::L1;
 
@@ -310,7 +317,10 @@ void Core::on_rising() {
   }
 
   if (startup_ > 0 && --startup_ > 0) return;
-  if ((t_ == TState::T4 || t_ == TState::Ti) && !next_) decide_next();
+  // Brief §4.4: HOLD is honoured between bus cycles, after the current one ends.
+  if (holding_ && !hold_req_) leave_hold();
+  if (!holding_ && hold_req_ && (t_ == TState::T4 || t_ == TState::Ti)) enter_hold();
+  if (!holding_ && (t_ == TState::T4 || t_ == TState::Ti) && !next_) decide_next();
 }
 
 void Core::on_falling() {
@@ -331,7 +341,7 @@ void Core::on_falling() {
       drive_a(s, timing_.tclav);
       if (cur_->is_read()) {
         float_ad(timing_.tclaz);
-        drive(pins_.rd_n, Logic::L0, timing_.tclrl);
+        drive(strobe_of(*cur_), Logic::L0, timing_.tclrl);
       } else {
         if (static_cast<double>(timing_.tclcl_crit) > clock_period_ps()) {
           for (int p : pins_.ad) drive(p, Logic::X, timing_.tcldv);
@@ -361,7 +371,7 @@ void Core::on_falling() {
           ad_driven_at_latch_[i] = in_[static_cast<std::size_t>(p)].v;
           watch_hold(p, &ad_latch_[i], timing_.tcldx);
         }
-        drive(pins_.rd_n, Logic::L1, timing_.tclrh);
+        drive(strobe_of(*cur_), Logic::L1, timing_.tclrh);
       } else {
         drive(pins_.wr_n, Logic::L1, timing_.tcvctx);
       }
@@ -369,7 +379,7 @@ void Core::on_falling() {
       break;
     case TState::T4:
     case TState::Ti:
-      if (next_) {
+      if (next_ && !holding_) {
         start_t1();
       } else {
         t_ = TState::Ti;
@@ -410,12 +420,35 @@ void Core::decide_next() {
   } else {
     return;
   }
-  if (next_->type == BusCycleType::Halt) return;
-  const bool memory = next_->type == BusCycleType::CodeFetch ||
-                      next_->type == BusCycleType::MemRead ||
-                      next_->type == BusCycleType::MemWrite;
+  drive_status(*next_);
+}
+
+// M/IO# and DT/R# for the next cycle, valid TCHCTV after CLK high before its T1.
+void Core::drive_status(const BusReq& r) {
+  if (r.type == BusCycleType::Halt) return;
+  const bool memory = r.type == BusCycleType::CodeFetch || r.type == BusCycleType::MemRead ||
+                      r.type == BusCycleType::MemWrite;
   drive(pins_.m_io_n, level(memory), timing_.tchctv);
-  drive(pins_.dt_r_n, level(!next_->is_read()), timing_.tchctv);
+  drive(pins_.dt_r_n, level(!r.is_read()), timing_.tchctv);
+}
+
+// HLDA high and every 3-state bus pin floated; ALE stays low. The EU keeps running from the
+// queue and waits for any bus cycle it needs.
+void Core::enter_hold() {
+  holding_ = true;
+  drive(pins_.hlda, Logic::L1, timing_.tchctv);
+  float_ad(timing_.tclaz);
+  for (int p : pins_.a) drive(p, Logic::Z, timing_.tclaz);
+  for (int p : {pins_.bhe_n, pins_.rd_n, pins_.wr_n, pins_.m_io_n, pins_.dt_r_n, pins_.den_n}) {
+    drive(p, Logic::Z, timing_.tclaz);
+  }
+}
+
+void Core::leave_hold() {
+  holding_ = false;
+  drive(pins_.hlda, Logic::L0, timing_.tchctv);
+  for (int p : {pins_.rd_n, pins_.wr_n, pins_.den_n}) drive(p, Logic::L1, timing_.tchctv);
+  if (next_) drive_status(*next_);
 }
 
 void Core::start_t1() {
@@ -432,7 +465,11 @@ void Core::start_t1() {
   last_bhe_n_ = cur_->bhe_n;
   drive(pins_.ale, Logic::L1, timing_.tcllh);
   if (cur_->type == BusCycleType::Halt) return;
-  drive_ad(static_cast<uint16_t>(cur_->addr & 0xFFFF), timing_.tclav);
+  if (cur_->type == BusCycleType::InterruptAck) {
+    float_ad(timing_.tclaz);  // no address in an INTA cycle
+  } else {
+    drive_ad(static_cast<uint16_t>(cur_->addr & 0xFFFF), timing_.tclav);
+  }
   drive_a(static_cast<uint8_t>((cur_->addr >> 16) & 0xF), timing_.tclav);
   drive(pins_.bhe_n, level(cur_->bhe_n), timing_.tclav);
 }

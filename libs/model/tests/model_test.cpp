@@ -11,6 +11,7 @@ namespace i8086::model {
 namespace {
 
 using test::Harness;
+using test::Txn;
 
 const spec::Spec& the_spec() {
   static const spec::Spec s = spec::Spec::load(I86_SOURCE_DIR "/spec/spec.yaml");
@@ -245,13 +246,136 @@ TEST(Behavioral, MaxModeIsNotImplementedYet) {
   EXPECT_THROW(h.clock(), NotImplemented);
 }
 
-TEST(Behavioral, HoldIsNotImplementedYet) {
+// ---- M8: interrupts, HOLD, HLT
+
+std::vector<const Txn*> of_type(const Harness& h, BusCycleType t) {
+  std::vector<const Txn*> v;
+  for (const Txn& x : h.txns) {
+    if (x.type == t) v.push_back(&x);
+  }
+  return v;
+}
+
+TEST(Behavioral, NmiRisingEdgeWakesHaltOnce) {
   Harness h;
-  h.boot({});
+  h.boot({0xC7, 0x06, 0x08, 0x00, 26, 0x00,    // mov [0008h], handler
+          0xC7, 0x06, 0x0A, 0x00, 0x00, 0x01,  // mov [000Ah], 0100h
+          0xF4, 0x43, 0xF4,                    // hlt; inc bx; hlt
+          0x41, 0xCF});                        // handler: inc cx; iret
   h.reset();
-  h.clock();
+  ASSERT_TRUE(h.run_until_halt());
+  EXPECT_EQ(of_type(h, BusCycleType::Halt).size(), 1u);
+  h.force["NMI"] = Logic::L1;
+  for (int i = 0; i < 4; ++i) h.clock();
+  ASSERT_TRUE(h.run_until_halt());
+  for (int i = 0; i < 100; ++i) h.clock();  // NMI held high: no second entry
+  EXPECT_EQ(h.arch().cx, 1);
+  EXPECT_EQ(h.arch().bx, 1);
+  EXPECT_TRUE(h.arch().halted);
+  EXPECT_EQ(of_type(h, BusCycleType::InterruptAck).size(), 0u);
+}
+
+TEST(Behavioral, IntrRunsTwoIntaCyclesAfterTheStiShadow) {
+  auto run = [](bool sti) {
+    auto h = std::make_unique<Harness>();
+    h->boot({0xC7, 0x06, 0x00, 0x01, 26, 0x00,    // mov [0100h], handler (type 40h)
+             0xC7, 0x06, 0x02, 0x01, 0x00, 0x01,  // mov [0102h], 0100h
+             uint8_t(sti ? 0xFB : 0x90), 0x90,    // sti (or nop); nop
+             0xF4,                                // hlt
+             0x58, 0xBA, 0x55, 0x00});            // handler: pop ax; mov dx, 55h; (hlt)
+    h->inta_type = 0x40;
+    h->force["INTR"] = Logic::L1;
+    h->reset();
+    EXPECT_TRUE(h->run_until_halt());
+    for (int i = 0; i < 20; ++i) h->clock();
+    return h;
+  };
+  const auto masked = run(false);
+  EXPECT_EQ(masked->arch().dx, 0);
+  EXPECT_EQ(of_type(*masked, BusCycleType::InterruptAck).size(), 0u);
+
+  const auto h = run(true);
+  EXPECT_EQ(h->arch().dx, 0x55);
+  EXPECT_EQ(h->arch().ax, 25);  // the NOP in the STI shadow ran first
+  const auto inta = of_type(*h, BusCycleType::InterruptAck);
+  ASSERT_EQ(inta.size(), 2u);
+  EXPECT_EQ(inta[1] - inta[0], 1);
+  EXPECT_EQ(inta[1]->data & 0xFF, 0x40);
+  const auto reads = of_type(*h, BusCycleType::MemRead);
+  ASSERT_GE(reads.size(), 2u);
+  EXPECT_EQ(reads[0]->addr, 0x100u);
+  EXPECT_EQ(reads[1]->addr, 0x102u);
+  EXPECT_GT(reads[0]->clk, inta[1]->clk);
+}
+
+TEST(Behavioral, HoldFloatsTheBusBetweenCycles) {
+  Harness h;
+  h.boot({0xB9, 0x14, 0x00,              // mov cx, 20
+          0x89, 0x0E, 0x00, 0x02,        // l: mov [0200h], cx
+          0x01, 0x0E, 0x02, 0x02,        // add [0202h], cx
+          0x49, 0x75, 0xF5});            // dec cx; jnz l
+  h.reset();
+  for (int i = 0; i < 60; ++i) h.clock();
   h.force["HOLD"] = Logic::L1;
-  EXPECT_THROW(h.clock(), NotImplemented);
+  int waited = 0;
+  while (h.level("HLDA") != Logic::L1 && waited < 12) {
+    h.clock();
+    ++waited;
+  }
+  ASSERT_EQ(h.level("HLDA"), Logic::L1);
+  const TState t = h.dut->bus_state().t;
+  EXPECT_TRUE(t == TState::T4 || t == TState::Ti);
+  h.clock();
+  for (const char* p : {"AD0", "AD15", "A19", "BHE_N", "RD_N", "WR_N", "M_IO_N", "DT_R_N", "DEN_N"}) {
+    EXPECT_EQ(h.level(p), Logic::Z) << p;
+  }
+  EXPECT_EQ(h.level("ALE"), Logic::L0);
+  const std::size_t n = h.txns.size();
+  for (int i = 0; i < 30; ++i) h.clock();
+  EXPECT_EQ(h.txns.size(), n);
+  h.force["HOLD"] = Logic::L0;
+  ASSERT_TRUE(h.run_until_halt());
+  EXPECT_EQ(h.level("HLDA"), Logic::L0);
+  EXPECT_EQ(h.mem[0x200] | (h.mem[0x201] << 8), 1);
+  EXPECT_EQ(h.mem[0x202] | (h.mem[0x203] << 8), 210);
+}
+
+TEST(Behavioral, IntrInterruptsRepAndResumesAtThePrefix) {
+  Harness h;
+  h.boot({0xC7, 0x06, 0x04, 0x01, 37, 0x00,    // mov [0104h], handler (type 41h)
+          0xC7, 0x06, 0x06, 0x01, 0x00, 0x01,  // mov [0106h], 0100h
+          0xBE, 0x00, 0x20,                    // mov si, 2000h
+          0xBF, 0x00, 0x30,                    // mov di, 3000h
+          0xB9, 0x28, 0x00,                    // mov cx, 40
+          0xFC, 0xFB,                          // cld; sti
+          0xF3, 0xA4,                          // rep movsb  (offset 34)
+          0xF4,                                // hlt
+          0x8B, 0xEC, 0x8B, 0x56, 0x00,        // handler: mov bp, sp; mov dx, [bp]
+          0x43, 0xCF});                        // inc bx; iret
+  std::vector<uint8_t> src(40);
+  for (std::size_t i = 0; i < src.size(); ++i) src[i] = static_cast<uint8_t>(i * 3 + 1);
+  h.load(0x2000, src);
+  h.inta_type = 0x41;
+  h.reset();
+  auto writes_to_dst = [&] {
+    int n = 0;
+    for (const Txn* t : of_type(h, BusCycleType::MemWrite)) n += t->addr >= 0x3000 && t->addr < 0x3028;
+    return n;
+  };
+  for (int i = 0; i < 20'000 && writes_to_dst() < 10; ++i) h.clock();
+  ASSERT_EQ(writes_to_dst(), 10);
+  h.force["INTR"] = Logic::L1;
+  for (int i = 0; i < 2'000 && of_type(h, BusCycleType::InterruptAck).size() < 2; ++i) h.clock();
+  h.force["INTR"] = Logic::L0;
+  const int before = writes_to_dst();
+  ASSERT_TRUE(h.run_until_halt());
+  EXPECT_EQ(h.arch().bx, 1);
+  EXPECT_EQ(h.arch().dx, 34);
+  EXPECT_EQ(h.arch().cx, 0);
+  EXPECT_GE(before, 10);
+  EXPECT_LT(before, 40);
+  EXPECT_EQ(writes_to_dst(), 40);
+  for (std::size_t i = 0; i < src.size(); ++i) EXPECT_EQ(h.mem[0x3000 + i], src[i]) << i;
 }
 
 }  // namespace

@@ -4,6 +4,7 @@
 #include <bit>
 #include <cstdio>
 #include <stdexcept>
+#include <utility>
 
 #include "behavioral/core.hpp"
 #include "i8086/common/errors.hpp"
@@ -47,16 +48,18 @@ void Core::BusAwait::await_suspend(std::coroutine_handle<> h) noexcept {
   c->waiting_ = h;
 }
 
-void Core::ForeverAwait::await_suspend(std::coroutine_handle<> h) noexcept {
-  c->wait_ = Wait::Forever;
+void Core::HaltAwait::await_suspend(std::coroutine_handle<> h) noexcept {
+  c->wait_ = Wait::Halt;
   c->waiting_ = h;
 }
 
 void Core::eu_tick() {
   switch (wait_) {
     case Wait::None:
-    case Wait::Forever:
       return;
+    case Wait::Halt:
+      if (!interrupt_waiting()) return;
+      break;
     case Wait::Start:
       break;
     case Wait::Clocks:
@@ -355,8 +358,19 @@ Task<> Core::eu_main() {
   for (;;) co_await step();
 }
 
+bool Core::interrupt_waiting() const { return nmi_pending_ || (intr_latched_ && flag(kIF)); }
+
+// Brief §5: NMI before INTR; nothing at the boundary after STI or an SS load.
 Task<> Core::step() {
-  if (intr_latched_ && flag(kIF)) throw NotImplemented("INTR/INTA [M8]");
+  if (!std::exchange(shadow_, false)) {
+    if (nmi_pending_) {
+      nmi_pending_ = false;
+      co_await interrupt(2);
+    } else if (intr_latched_ && flag(kIF)) {
+      co_await acknowledge_intr();
+    }
+  }
+  insn_ip_ = ip_;
   const bool trap = flag(kTF);
   inhibit_ = false;
   seg_override_ = -1;
@@ -374,7 +388,15 @@ Task<> Core::step() {
     op = co_await fetch8();
   }
   co_await exec(op);
+  if (inhibit_) shadow_ = true;
   if (trap && !inhibit_) co_await interrupt(1);
+}
+
+// Two INTA# cycles; the second reads the type byte on D7-D0 (brief §4.1).
+Task<> Core::acknowledge_intr() {
+  co_await bus_read(BusCycleType::InterruptAck, 0, kStatusNone, false);
+  const uint16_t type = co_await bus_read(BusCycleType::InterruptAck, 0, kStatusNone, false);
+  co_await interrupt(static_cast<uint8_t>(type & 0xFF));
 }
 
 // Brief §5: push FLAGS, clear IF and TF, push CS, push IP, load IP and CS from type×4.
@@ -587,6 +609,11 @@ Task<> Core::exec(uint8_t op) {
         co_await clocks(movs ? 9 : 6);
         if (rep_ == 0) break;
         regs_[kCX] = u16(regs_[kCX] - 1U);
+        // An interrupt suspends the string between iterations; IRET resumes it at the prefix.
+        if (regs_[kCX] != 0 && interrupt_waiting()) {
+          jump(sregs_[kCS], insn_ip_);
+          co_return;
+        }
       }
       co_return;
     }
@@ -713,13 +740,15 @@ Task<> Core::exec(uint8_t op) {
       co_return;
     }
 
-    // ---- HLT: min-mode halt cycle (ALE pulse, no strobes); the BIU then idles until RESET
+    // ---- HLT: min-mode halt cycle (ALE pulse, no strobes); the BIU idles until NMI, INTR
+    // with IF = 1, or RESET. The interrupt then stacks the IP after the HLT.
     case 0xF4: {
       BusReq r;
       r.type = BusCycleType::Halt;
       r.addr = phys(kCS, ip_);
       co_await BusAwait{this, r};
-      co_await ForeverAwait{this};
+      co_await HaltAwait{this};
+      halted_ = false;
       co_return;
     }
 
@@ -755,7 +784,11 @@ Task<> Core::exec(uint8_t op) {
     case 0xF8: set_flag(kCF, false); co_await clocks(2); co_return;
     case 0xF9: set_flag(kCF, true); co_await clocks(2); co_return;
     case 0xFA: set_flag(kIF, false); co_await clocks(2); co_return;
-    case 0xFB: set_flag(kIF, true); co_await clocks(2); co_return;
+    case 0xFB:
+      set_flag(kIF, true);
+      shadow_ = true;
+      co_await clocks(2);
+      co_return;
     case 0xFC: set_flag(kDF, false); co_await clocks(2); co_return;
     case 0xFD: set_flag(kDF, true); co_await clocks(2); co_return;
 

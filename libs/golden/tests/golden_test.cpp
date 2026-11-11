@@ -138,6 +138,53 @@ TEST(Golden, D3_DivideErrorStacksIpPastDiv) {
   EXPECT_EQ(r.regs.cx & 0xF002, 0xF002);
 }
 
+// ---- external interrupt requests (M8) -------------------------------------------------------
+
+TEST(Golden, IntrIsTakenAfterTheStiShadow) {
+  // MOV SP,1000h; STI; NOP; NOP   (second NOP, index 4, at 0105h)
+  Program p = boot({0xBC, 0x00, 0x10, 0xFB, 0x90, 0x90});
+  add_handler(p, 0x20, 0x0200, {0x58, 0xF4});  // POP AX (IP); HLT
+  p.interrupts.push_back({.instruction_index = 3, .nmi = false, .type = 0x20});
+  const Result r = run(p);
+  ASSERT_EQ(r.interrupts.size(), 1u);
+  EXPECT_EQ(r.interrupts[0].type, 0x20);
+  EXPECT_EQ(r.interrupts[0].instruction_index, 4u);
+  EXPECT_EQ(r.regs.ax, 0x0105);
+}
+
+TEST(Golden, MaskedIntrWaitsForSti) {
+  // MOV SP,1000h; NOP; STI; NOP; HLT at 0106h
+  Program p = boot({0xBC, 0x00, 0x10, 0x90, 0xFB, 0x90});
+  add_handler(p, 0x20, 0x0200, {0x58, 0xF4});
+  p.interrupts.push_back({.instruction_index = 1, .nmi = false, .type = 0x20});
+  const Result r = run(p);
+  ASSERT_EQ(r.interrupts.size(), 1u);
+  EXPECT_EQ(r.interrupts[0].instruction_index, 5u);
+  EXPECT_EQ(r.regs.ax, 0x0106);
+}
+
+TEST(Golden, NmiDuringHaltResumesAfterHlt) {
+  // MOV SP,1000h; HLT; INC BX; (HLT)
+  Program p = boot({0xBC, 0x00, 0x10, 0xF4, 0x43});
+  add_handler(p, 2, 0x0200, {0x41, 0xCF});  // INC CX; IRET
+  p.interrupts.push_back({.instruction_index = InterruptRequest::kDuringHalt, .nmi = true});
+  const Result r = run(p);
+  EXPECT_EQ(r.stop, StopReason::Halt);
+  ASSERT_EQ(r.interrupts.size(), 1u);
+  EXPECT_EQ(r.interrupts[0].type, 2);
+  EXPECT_EQ(r.regs.cx, 1);
+  EXPECT_EQ(r.regs.bx, 1);
+}
+
+TEST(Golden, MaskedIntrDoesNotWakeHalt) {
+  Program p = boot({0xBC, 0x00, 0x10, 0xFA, 0xF4, 0x43});  // CLI; HLT; INC BX
+  p.interrupts.push_back({.instruction_index = InterruptRequest::kDuringHalt, .nmi = false, .type = 0x20});
+  const Result r = run(p);
+  EXPECT_EQ(r.stop, StopReason::Halt);
+  EXPECT_TRUE(r.interrupts.empty());
+  EXPECT_EQ(r.regs.bx, 0);
+}
+
 TEST(Golden, D4_SegmentDefaults) {
   Program p = boot({
       0xB8, 0x00, 0x01, 0x8E, 0xD0,  // MOV AX,0100h; MOV SS,AX
