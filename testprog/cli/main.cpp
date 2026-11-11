@@ -35,14 +35,15 @@ void usage(std::ostream& os) {
         "               [--temp C[,C...]] [--tests SEL] [--out DIR] [--list]\n"
         "       i86test --shmoo [--spec FILE] [--die FILE] [--temp C] [--out DIR]\n"
         "       i86test --coverage EXPECTED [--spec FILE] [--dies DIR] [--grade ...] [--vcc ...]\n"
-        "               [--temp ...] [--out DIR]\n"
+        "               [--temp ...] [--only DIE[,DIE...]] [--out DIR]\n"
         "  SEL: comma-separated ids, prefixes or ranges, e.g. 'A*,D1-D11' (default '*')\n"
         "  G:   8086, 8086-2, 8086-1 (default: all)\n"
         "  --shmoo writes shmoo.csv, shmoo.txt and shmoo.svg (VCC x MHz, design doc 6.5) and\n"
         "          exits 1 if a cell inside a grade's spec box fails\n"
         "  --coverage runs DIR/fault_*.yaml (default spec/dies) and every die EXPECTED lists, writes\n"
         "          coverage.md and coverage.csv, and exits 1 unless each die's failing tests are\n"
-        "          exactly the ones EXPECTED lists for it\n";
+        "          exactly the ones EXPECTED lists for it; --only limits it to the named dies\n"
+        "  I86_JOBS=N runs the matrix on N threads (default: one per core); output is the same\n";
 }
 
 }  // namespace
@@ -51,6 +52,7 @@ int main(int argc, char** argv) {
   testprog::RunConfig cfg;
   bool list = false, shmoo = false;
   std::filesystem::path coverage, dies_dir = "spec/dies";
+  std::vector<std::string> only;
   try {
     for (int i = 1; i < argc; ++i) {
       const std::string arg = argv[i];
@@ -71,6 +73,7 @@ int main(int argc, char** argv) {
       else if (arg == "--shmoo") shmoo = true;
       else if (arg == "--coverage") coverage = value();
       else if (arg == "--dies") dies_dir = value();
+      else if (arg == "--only") only = split(value());
       else if (arg == "-h" || arg == "--help") {
         usage(std::cout);
         return 0;
@@ -110,7 +113,7 @@ int main(int argc, char** argv) {
       return r.box_fails() == 0 ? 0 : 1;
     }
     if (!coverage.empty()) {
-      testprog::CoverageConfig cc{cfg, dies_dir, coverage};
+      testprog::CoverageConfig cc{cfg, dies_dir, coverage, only};
       const auto r = testprog::run_coverage(cc, std::cout);
       std::filesystem::create_directories(cfg.out_dir);
       std::ofstream csv(cfg.out_dir / "coverage.csv");

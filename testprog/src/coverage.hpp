@@ -28,6 +28,7 @@ struct CoverageConfig {
   RunConfig run;                       // spec, grades, VCC, temperatures, out_dir; die is ignored
   std::filesystem::path dies_dir = "spec/dies";
   std::filesystem::path expected_path = "regression/expected.yaml";
+  std::vector<std::string> only;       // die names to run; empty = every die
 };
 
 struct DieCoverage {

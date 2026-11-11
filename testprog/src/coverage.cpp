@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <format>
+#include <stdexcept>
 
 #include "i8086/model/die_profile.hpp"
 #include "i8086/spec/spec.hpp"
@@ -102,6 +103,12 @@ CoverageResult run_coverage(const CoverageConfig& cfg, std::ostream& console) {
     if (entry.path().extension() == ".yaml" && stem.starts_with("fault_")) names.insert(stem);
   }
   for (const auto& [die, tests] : expected.fault_coverage) names.insert(die);
+  if (!cfg.only.empty()) {
+    for (const auto& name : cfg.only) {
+      if (!names.contains(name)) throw std::invalid_argument("--only: no fault die named " + name);
+    }
+    names = {cfg.only.begin(), cfg.only.end()};
+  }
 
   CoverageResult result;
   result.tests = TestRegistry::global().select(cfg.run.tests);

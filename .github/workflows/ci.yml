@@ -4,6 +4,7 @@ on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:  # run on any branch by hand, e.g. to warm the compiler cache before a demo
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -16,10 +17,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install NASM
-        run: sudo apt-get update && sudo apt-get install -y nasm
+      - name: Install NASM and ccache
+        run: sudo apt-get update && sudo apt-get install -y nasm ccache
+
+      - name: Compiler cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-regress-${{ github.sha }}
+          restore-keys: ccache-regress-
 
       - name: Regression
+        env:
+          CMAKE_C_COMPILER_LAUNCHER: ccache
+          CMAKE_CXX_COMPILER_LAUNCHER: ccache
+          CCACHE_MAXSIZE: 500M
         run: ./regress
 
       - name: Upload out/
@@ -40,10 +52,20 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Install NASM
-        run: sudo apt-get update && sudo apt-get install -y nasm
+      - name: Install NASM and ccache
+        run: sudo apt-get update && sudo apt-get install -y nasm ccache
+      - name: Compiler cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-asan-${{ github.sha }}
+          restore-keys: ccache-asan-
       - name: Configure, build, test
+        env:
+          CMAKE_C_COMPILER_LAUNCHER: ccache
+          CMAKE_CXX_COMPILER_LAUNCHER: ccache
+          CCACHE_MAXSIZE: 500M
         run: |
           cmake --preset asan
           cmake --build --preset asan -j "$(nproc)"
-          ctest --preset asan
+          ctest --preset asan -j "$(nproc)"
