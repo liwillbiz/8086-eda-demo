@@ -17,6 +17,7 @@
 /regress                  @spec-integration-lead
 /.github/                 @spec-integration-lead
 /docs/                    @spec-integration-lead
+/demo/                    @spec-integration-lead
 
 # Layer 2 — Model owner
 /libs/model/              @model-owner

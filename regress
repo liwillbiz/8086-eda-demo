@@ -33,8 +33,8 @@ if ! ctest --preset regress -j "$CMAKE_BUILD_PARALLEL_LEVEL" >"$OUT/unit-tests.l
   status=1
   failed+=("unit tests")
 fi
-tail -n 3 "$OUT/unit-tests.log" | sed 's/^/   /'
-if [ "$status" -ne 0 ]; then grep -E '^\s+[0-9]+ - ' "$OUT/unit-tests.log" | sed 's/^/   FAILED/' || true; fi
+grep -E 'tests passed|No tests were found' "$OUT/unit-tests.log" | sed 's/^/   /' || tail -n 5 "$OUT/unit-tests.log" | sed 's/^/   /'
+if [ "$status" -ne 0 ]; then grep -E '^\s+[0-9]+ - ' "$OUT/unit-tests.log" | sed 's/^\s*/   FAILED /' || true; fi
 
 echo "== [2/4] good die: all tests x grades {$GRADES} x VCC {$VCC} x TA {$TEMP}"
 "$BIN" --die spec/dies/good.yaml --grade "$GRADES" --vcc "$VCC" --temp "$TEMP" \
@@ -61,7 +61,8 @@ for pair in "${baselines[@]}"; do
     cp "$src" "$base"
     echo "   accepted: $base"
   elif [ -f "$base" ]; then
-    if ! diff -u "$base" "$src"; then
+    if ! cmp -s "$base" "$src"; then
+      diff -u "$base" "$src" | head -n 40 || true
       echo "   $src differs from $base (run ./regress --accept if intended)"
       status=1
       failed+=("baseline ${base##*/}")
