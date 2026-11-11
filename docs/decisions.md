@@ -228,5 +228,6 @@ interface choices M0 had to make where the design doc only sketched them.
   - The matrix runs on a thread pool (`I86_JOBS`, default one per core). Output is byte-identical to a serial run. The good-die matrix drops from 44 s to about 6 s on 8 cores.
   - A unit-test failure no longer stops the run, so the matrix, coverage and shmoo still report what a change broke.
   - The baseline diff is capped at 40 lines, and `out/summary.md` ends with `**regress: FAIL** in: …`.
-  - CI uses ccache with an `actions/cache` entry per job. GitHub restores caches only from the PR's own ref, its base branch, or the default branch, so the workflow also has a `workflow_dispatch` trigger to warm the cache on a demo base branch.
+  - CI uses ccache with an `actions/cache` entry per job. GitHub restores caches only from the PR's own ref, its base branch, or the default branch. A new demo PR therefore starts warm only once `main` has a cached run (every push to `main` makes one). The `workflow_dispatch` trigger, usable once this workflow is on `main`, warms any other base branch.
+  - Cold-cache CI for this branch: `./regress` 5 min 41 s, ASan unit tests 13 min.
 - **Stuck pin.** `i86test --coverage … --only DIE` runs the coverage check for the named dies only. `demo/demo.sh stuck-pin` runs `fault_stuck_ad3` at the regress grid in under a second.
