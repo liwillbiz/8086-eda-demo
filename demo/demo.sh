@@ -70,7 +70,7 @@ cmd_check() {
 
 cmd_kickoff() {
   need_clean_tree
-  ./regress | grep -E '^(== |   )' || true
+  ./regress 2>&1 | grep -E '^(== |   )' || true
   [ -f out/summary.md ] || die "regress produced no out/summary.md"
   say ""
   head -n 12 out/summary.md
