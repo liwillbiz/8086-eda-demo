@@ -1,7 +1,29 @@
 # Simulated silicon for a "good" die: inside every spec.yaml limit with margin.
 # Owner: Model owner. Read only by the device model and ElectricalModel.
-# M0 skeleton; M3 fills `timing_ns`, M6 fills `electrical`, M7 adds `faults`.
+# M3 fills `timing_ns`, M6 fills `electrical`, M7 adds `faults`.
 name: good
-timing_ns: {}
+
+# Nominal delays and input requirements at VCC 5.0 V, 25 °C, before derating and load.
+# Keys are datasheet symbols; the ones not (yet) in spec.yaml are datasheet min-mode
+# parameters the model needs to place an edge (TCLAZ, TCLDV, TCLLH, TCHLL, TCVCTV,
+# TCVCTX, TCHCTV). Margins below are against the tightest grade (8086-1 at 100 ns).
+timing_ns:
+  # Output delays, measured from the CLK edge that starts them.
+  TCLAV: 35    # address / status valid after CLK low        (spec max 50)
+  TCLAZ: 25    # AD float after CLK low
+  TCLDV: 40    # write data valid after CLK low
+  TCLLH: 20    # ALE high after CLK low in T1
+  TCHLL: 15    # ALE low after CLK high in T1             (TLHLL ≈ TCLCH − 20 + 15)
+  TCLRL: 40    # RD# low after CLK low in T2              (spec max 100)
+  TCLRH: 35    # RD# high after CLK low in T4             (spec max 80)
+  TCVCTV: 35   # WR#, DEN# active after CLK low in T2
+  TCVCTX: 30   # WR#, DEN# inactive after CLK low in T4
+  TCHCTV: 30   # M/IO#, DT/R# valid after CLK high before T1
+  # Input requirements of this die (smaller than the spec minimum = margin).
+  TDVCL: 3     # read data setup before CLK low ending T3  (spec min 5)
+  TCLDX: 4     # read data hold after that edge            (spec min 10)
+  TRYHCH: 20   # READY setup before CLK high               (spec min 2/3*TCLCL-15)
+  TCHRYX: 8    # READY hold after CLK high                 (spec min 20)
+  TINVCH: 8    # INTR/NMI/HOLD setup before CLK high       (spec min 15)
 electrical: {}
 faults: []
