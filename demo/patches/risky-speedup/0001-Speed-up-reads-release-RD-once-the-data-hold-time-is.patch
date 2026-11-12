@@ -1,0 +1,24 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Cursor Agent <cursoragent@cursor.com>
+Date: Wed, 11 Nov 2026 00:50:46 +0000
+Subject: [PATCH] Speed up reads: release RD# once the data hold time is met
+
+Co-authored-by: W L <liwillbiz@users.noreply.github.com>
+---
+ libs/model/src/behavioral/core_biu.cpp | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/libs/model/src/behavioral/core_biu.cpp b/libs/model/src/behavioral/core_biu.cpp
+index bebe92f..5082527 100644
+--- a/libs/model/src/behavioral/core_biu.cpp
++++ b/libs/model/src/behavioral/core_biu.cpp
+@@ -371,7 +371,8 @@ void Core::on_falling() {
+           ad_driven_at_latch_[i] = in_[static_cast<std::size_t>(p)].v;
+           watch_hold(p, &ad_latch_[i], timing_.tcldx);
+         }
+-        drive(strobe_of(*cur_), Logic::L1, timing_.tclrh);
++        // The data is latched on this edge, so RD# only has to stay low for its hold time.
++        drive(strobe_of(*cur_), Logic::L1, timing_.tcldx);
+       } else {
+         drive(pins_.wr_n, Logic::L1, timing_.tcvctx);
+       }

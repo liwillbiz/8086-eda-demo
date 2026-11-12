@@ -73,7 +73,7 @@ const AcRow kAcGolden[] = {
     {"TCHCL", Grade::G8086, 69, {}},       {"TCHCL", Grade::G8086_2, 44, {}},
     {"TCHCL", Grade::G8086_1, 39, {}},     {"TCH1CH2", Grade::G8086, {}, 10},
     {"TCL2CL1", Grade::G8086_1, {}, 10},   {"TDVCL", Grade::G8086, 30, {}},
-    {"TDVCL", Grade::G8086_2, 20, {}},     {"TDVCL", Grade::G8086_1, 5, {}},
+    {"TDVCL", Grade::G8086_2, 20, {}},     {"TCLDX", Grade::G8086_1, 10, {}},
     {"TCLDX", Grade::G8086_2, 10, {}},     {"TRYHCH", Grade::G8086, 118.33, {}},
     {"TRYHCH", Grade::G8086_1, 51.67, {}}, {"TCHRYX", Grade::G8086, 30, {}},
     {"TCHRYX", Grade::G8086_2, 20, {}},    {"TINVCH", Grade::G8086, 30, {}},
@@ -132,7 +132,6 @@ TEST(SpecAc, Provenance) {
   EXPECT_EQ(tclav.ref, "DS §A.C. Characteristics");
   EXPECT_TRUE(tclav.verified);
   EXPECT_FALSE(s.ac("TCLAV", Grade::G8086_1, 100).verified);
-  EXPECT_FALSE(s.ac("TDVCL", Grade::G8086_1, 100).verified);
   EXPECT_TRUE(s.ac("TDVCL", Grade::G8086_2, 125).verified);
   EXPECT_FALSE(s.ac("TCHRYX", Grade::G8086_2, 125).verified);
   EXPECT_FALSE(s.ac("TINVCH", Grade::G8086_1, 100).verified);

@@ -9,16 +9,29 @@ characterization.
 - Device facts: [`docs/8086-reference-brief.md`](docs/8086-reference-brief.md)
 - Decisions: [`docs/decisions.md`](docs/decisions.md)
 
-**Status: M8 (interrupts, HOLD and HLT).** On top of M5 (A1–A3, D1–D6, D8, D9, D11 with
-golden diff and differential fuzz), M6 (B1–B5 and C1–C7 margins, shmoo) and M7 (fault
-injection and coverage), the model now handles INTR/INTA, the NMI edge, HOLD/HLDA bus float,
-HLT wake-up and interruptible REP. The tester drives timed INTR/NMI/HOLD stimuli
-(`RunOpts::stimuli`) and serves the INTA type byte, and the golden takes matching
-`Program::interrupts`. A4–A7, B6 (TINVCH), D7 and D10 are registered. Each of the 12
-`spec/dies/fault_*.yaml` dies must be caught by exactly the tests `regression/expected.yaml`
-lists for it; `fault_setup_intr` is caught by B6 alone. `spec/dies/good.yaml` and
-`spec/dies/marginal.yaml` pass every test at every grade × VCC × TA point. `./regress` diffs the
-results matrix and both dies' shmoos against `regression/baselines/`. Max mode is M9.
+**Status: M10 (demo ready).** M5 (A1–A3, D1–D6, D8, D9, D11 with golden diff and
+differential fuzz), M6 (B1–B5 and C1–C7 margins, shmoo), M7 (fault injection and coverage) and
+M8 (INTR/INTA, NMI, HOLD/HLDA, HLT, interruptible REP; A4–A7, B6, D7, D10) are in. Each of the
+12 `spec/dies/fault_*.yaml` dies must be caught by exactly the tests `regression/expected.yaml`
+lists for it. `spec/dies/good.yaml` and `spec/dies/marginal.yaml` pass every test at every
+grade × VCC × TA point. `./regress` diffs the results matrix and both dies' shmoos against
+`regression/baselines/`. Max mode (M9) is a stretch goal.
+
+## Demo quick start
+
+The demo (design doc §12) uses `demo/demo.sh`; run it with no arguments for help.
+
+```bash
+export DEMO_BASE=origin/main            # the branch demo PRs target
+demo/demo.sh check                      # tools, git identity, base branch, patches
+demo/demo.sh kickoff                    # ./regress, green summary and good-die shmoo
+demo/demo.sh branch risky --push        # RD# "speed-up" + INC refactor -> open the PR it links
+demo/demo.sh explain                    # after ./regress (or in an unzipped CI artifact)
+demo/demo.sh revert inc --push          # triage: B5 is the only failure left
+demo/demo.sh revert speedup --push      # green again
+demo/demo.sh branch spec-fix --value 5 --push   # one line in spec/spec.yaml (TDVCL, 8086-1)
+demo/demo.sh stuck-pin                  # fault_stuck_ad3 fails exactly as expected.yaml says
+```
 
 ## The four layers
 
@@ -66,7 +79,8 @@ build/regress/testprog/i86test --die spec/dies/good.yaml --grade 8086-2 \
 
 Outputs are written to `out/`: `summary.md`, `results.csv`, and `datalog.jsonl`. Presets:
 `dev`, `asan`, `release`, and `regress` (RelWithDebInfo with `-Werror`; this is what CI runs).
-To pick a compiler, set `CXX`, for example `CXX=g++ ./regress`.
+To pick a compiler, set `CXX`, for example `CXX=g++ ./regress`. `I86_JOBS=N` sets the
+matrix's thread count (default: one per core).
 
 ## Repo layout
 
@@ -81,6 +95,7 @@ testprog/        include/, src/ (registry, runner, ROM and margin harness, proto
                  shmoo), cases/A..E,
                  roms/ (NASM test ROMs), patterns/ (.pat), report/, cli/
 regression/      expected.yaml, baselines/
+demo/            demo.sh, patches/ (the prepared risky change)
 docs/            design, brief, decisions
 ```
 

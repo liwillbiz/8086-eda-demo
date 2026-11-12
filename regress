@@ -22,25 +22,33 @@ VCC=4.5,5.0,5.5
 TEMP=0,70
 
 echo "== [1/4] configure, build, unit tests"
-cmake --workflow --preset regress
-
+cmake --preset regress
+cmake --build --preset regress
 rm -rf "$OUT"
 mkdir -p "$OUT"
 status=0
+failed=()
+# A unit-test failure does not stop the run: steps 2-4 still report what the change broke.
+if ! ctest --preset regress -j "$CMAKE_BUILD_PARALLEL_LEVEL" >"$OUT/unit-tests.log" 2>&1; then
+  status=1
+  failed+=("unit tests")
+fi
+grep -E 'tests passed|No tests were found' "$OUT/unit-tests.log" | sed 's/^/   /' || tail -n 5 "$OUT/unit-tests.log" | sed 's/^/   /'
+if [ "$status" -ne 0 ]; then grep -E '^\s+[0-9]+ - ' "$OUT/unit-tests.log" | sed 's/^\s*/   FAILED /' || true; fi
 
 echo "== [2/4] good die: all tests x grades {$GRADES} x VCC {$VCC} x TA {$TEMP}"
 "$BIN" --die spec/dies/good.yaml --grade "$GRADES" --vcc "$VCC" --temp "$TEMP" \
-       --tests '*' --out "$OUT/good" || status=1
+       --tests '*' --out "$OUT/good" || { status=1; failed+=("good die"); }
 
 echo "== [3/4] fault coverage: spec/dies/fault_*.yaml vs regression/expected.yaml"
 # Grades x VCC {4.5, 5.5} x TA {70}: the same caught sets as the full matrix, at a third of the time.
 "$BIN" --coverage regression/expected.yaml --dies spec/dies --grade "$GRADES" --vcc 4.5,5.5 \
-       --temp 70 --out "$OUT/faults" || status=1
+       --temp 70 --out "$OUT/faults" || { status=1; failed+=("fault coverage"); }
 
 echo "== [4/4] shmoo (good, marginal) and baseline diff"
 SHMOO_DIES=(good marginal)
 for die in "${SHMOO_DIES[@]}"; do
-  "$BIN" --shmoo --die "spec/dies/$die.yaml" --out "$OUT/shmoo_$die" || status=1
+  "$BIN" --shmoo --die "spec/dies/$die.yaml" --out "$OUT/shmoo_$die" || { status=1; failed+=("shmoo $die"); }
 done
 
 mkdir -p regression/baselines
@@ -53,9 +61,11 @@ for pair in "${baselines[@]}"; do
     cp "$src" "$base"
     echo "   accepted: $base"
   elif [ -f "$base" ]; then
-    if ! diff -u "$base" "$src"; then
+    if ! cmp -s "$base" "$src"; then
+      diff -u "$base" "$src" | head -n 40 || true
       echo "   $src differs from $base (run ./regress --accept if intended)"
       status=1
+      failed+=("baseline ${base##*/}")
     fi
   else
     echo "   (no baseline $base yet)"
@@ -65,5 +75,10 @@ done
 cp "$OUT/good/summary.md" "$OUT/summary.md"
 if [ -f "$OUT/faults/coverage.md" ]; then { echo; cat "$OUT/faults/coverage.md"; } >> "$OUT/summary.md"; fi
 for die in "${SHMOO_DIES[@]}"; do cp "$OUT/shmoo_$die/shmoo.svg" "$OUT/shmoo_$die.svg"; done
-if [ "$status" -eq 0 ]; then echo "== regress: PASS"; else echo "== regress: FAIL"; fi
+if [ "$status" -eq 0 ]; then
+  echo "== regress: PASS"
+else
+  { echo; echo "**regress: FAIL** in: $(IFS=,; echo "${failed[*]}" | sed 's/,/, /g')"; } >> "$OUT/summary.md"
+  echo "== regress: FAIL ($(IFS=,; echo "${failed[*]}" | sed 's/,/, /g'))"
+fi
 exit "$status"
