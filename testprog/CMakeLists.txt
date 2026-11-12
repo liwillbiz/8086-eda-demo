@@ -61,6 +61,7 @@ add_library(i86testprog
   src/protocol.cpp
   src/margin.cpp
   src/shmoo.cpp
+  src/coverage.cpp
   report/datalog.cpp
   report/summary.cpp
   report/shmoo.cpp
@@ -69,7 +70,7 @@ add_library(i86::testprog ALIAS i86testprog)
 target_include_directories(i86testprog
   PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
   PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_link_libraries(i86testprog PUBLIC i86::tester i86::golden i86::spec)
+target_link_libraries(i86testprog PUBLIC i86::tester i86::golden i86::spec PRIVATE yaml-cpp::yaml-cpp)
 i86_target_defaults(i86testprog)
 
 # Object library so REGISTER_TEST static initializers are never dropped by the linker.
@@ -87,6 +88,7 @@ i86_target_defaults(i86test)
 i86_add_unit_test(testprog_unit
   SOURCES tests/smoke_test.cpp tests/harness_test.cpp tests/cases_test.cpp
           tests/differential_fuzz_test.cpp tests/report_test.cpp tests/margin_test.cpp
+          tests/coverage_test.cpp
   LIBS i86cases i86::testprog)
 if(TARGET testprog_unit)
   target_include_directories(testprog_unit PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)

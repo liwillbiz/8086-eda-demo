@@ -1,0 +1,57 @@
+# Fault-coverage die (design doc §4.2, M7): the good die plus one fault.
+# RD# falls 45 ns late (TCLRL 40 -> 85 ns nominal; 116 ns at the worst corner).
+# regression/expected.yaml lists the tests that must catch it.
+name: fault_slow_rd
+
+# Nominal delays and input requirements at VCC 5.0 V, 25 °C, before derating and load.
+# Keys are datasheet symbols; the ones not (yet) in spec.yaml are datasheet min-mode
+# parameters the model needs to place an edge (TCLAZ, TCLDV, TCLLH, TCHLL, TCVCTV,
+# TCVCTX, TCHCTV). Margins below are against the tightest grade (8086-1 at 100 ns) at the
+# worst corner (4.5 V, 70 °C: k = 1.33) with CL = 100 pF (+3 ns).
+timing_ns:
+  # Output delays, measured from the CLK edge that starts them.
+  TCLAV: 30    # address / status valid after CLK low        (spec max 50; worst 43)
+  TCLAZ: 25    # AD float after CLK low
+  TCLDV: 40    # write data valid after CLK low
+  TCLLH: 20    # ALE high after CLK low in T1
+  TCHLL: 15    # ALE low after CLK high in T1             (TLHLL ≈ TCLCH − 20 + 15)
+  TCLRL: 40    # RD# low after CLK low in T2              (spec max 100)
+  TCLRH: 35    # RD# high after CLK low in T4             (spec max 80)
+  TCVCTV: 35   # WR#, DEN# active after CLK low in T2
+  TCVCTX: 30   # WR#, DEN# inactive after CLK low in T4
+  TCHCTV: 30   # M/IO#, DT/R# valid after CLK high before T1
+  # Input requirements of this die (smaller than the spec minimum = margin).
+  TDVCL: 3     # read data setup before CLK low ending T3  (spec min 5; worst 4.0)
+  TCLDX: 4     # read data hold after that edge            (spec min 10)
+  TRYHCH: 20   # READY setup before CLK high               (spec min 2/3*TCLCL-15)
+  TCHRYX: 8    # READY hold after CLK high                 (spec min 20)
+  TINVCH: 8    # INTR/NMI/HOLD setup before CLK high       (spec min 15)
+  # Internal critical path: shortest CLK period at which write data settles (not a
+  # datasheet symbol). Gives the shmoo its Fmax(VCC) edge.        (worst 83 ns < 100)
+  TCLCL_CRIT: 62
+
+# ElectricalModel (design doc §5.2). Keys: libs/tester/src/electrical/electrical_model.cpp.
+electrical:
+  # k(VCC,T) = ((5.0 - 1.0) / (VCC - 1.0))^1.5 * (1 + 0.002 * (T - 25))
+  derate_vnom_v: 5.0
+  derate_vt_v: 1.0
+  derate_alpha: 1.5
+  derate_beta_per_c: 0.002
+  # Inputs switch at 1.4 V ± 0.1 V                     (spec VIL max 0.8, VIH min 2.0)
+  vin_threshold_v: 1.4
+  vin_band_v: 0.2
+  # VOL = 0.15 + 40 Ω × 2.5 mA = 0.25 V               (spec max 0.45)
+  vol_offset_v: 0.15
+  ron_low_ohm: 40
+  # VOH = VCC − 0.6 − 300 Ω × 0.4 mA = 3.78 V at 4.5 V (spec min 2.4)
+  voh_drop_v: 0.6
+  ron_high_ohm: 300
+  leak_ua: 0.5                 # |ILI|, |ILO|            (spec 10 µA)
+  load_slope_ns_per_pf: 0.03   # +3 ns at CL = 100 pF
+  # ICC = 260 + 30 × (VCC − 5) − 0.4 × (T − 25) mA; 285 mA at 5.5 V, 0 °C (spec 340)
+  icc_base_ma: 260
+  icc_ma_per_v: 30
+  icc_ma_per_c: -0.4
+
+faults:
+  - { type: SlowTiming, params: [TCLRL], add_ns: 45 }

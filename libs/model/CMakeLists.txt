@@ -12,4 +12,5 @@ i86_target_defaults(i86model)
 
 i86_add_unit_test(model_unit
   SOURCES tests/harness.cpp tests/model_test.cpp tests/bus_cycle_test.cpp tests/instruction_test.cpp
+          tests/fault_test.cpp
   LIBS i86::model)

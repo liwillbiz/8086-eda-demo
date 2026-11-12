@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # One-command regression (design doc §8).
-#   ./regress            build, unit tests, test matrix on every die, shmoo, baseline diff
+#   ./regress            build, unit tests, good-die matrix, fault coverage, shmoo, baseline diff
 #   ./regress --accept   same, then overwrite regression/baselines/ (review the diff in your PR)
 set -euo pipefail
 
@@ -32,17 +32,10 @@ echo "== [2/4] good die: all tests x grades {$GRADES} x VCC {$VCC} x TA {$TEMP}"
 "$BIN" --die spec/dies/good.yaml --grade "$GRADES" --vcc "$VCC" --temp "$TEMP" \
        --tests '*' --out "$OUT/good" || status=1
 
-echo "== [3/4] fault-coverage dies"
-shopt -s nullglob
-fault_dies=(spec/dies/fault_*.yaml)
-if [ ${#fault_dies[@]} -eq 0 ]; then
-  echo "   (none yet; added in M7 together with regression/expected.yaml)"
-fi
-for die in "${fault_dies[@]}"; do
-  name=$(basename "$die" .yaml)
-  # M7: compare the failing set against regression/expected.yaml instead of ignoring it.
-  "$BIN" --die "$die" --grade "$GRADES" --vcc "$VCC" --temp "$TEMP" --out "$OUT/$name" || true
-done
+echo "== [3/4] fault coverage: spec/dies/fault_*.yaml vs regression/expected.yaml"
+# Grades x VCC {4.5, 5.5} x TA {70}: the same caught sets as the full matrix, at a third of the time.
+"$BIN" --coverage regression/expected.yaml --dies spec/dies --grade "$GRADES" --vcc 4.5,5.5 \
+       --temp 70 --out "$OUT/faults" || status=1
 
 echo "== [4/4] shmoo (good, marginal) and baseline diff"
 SHMOO_DIES=(good marginal)
@@ -70,6 +63,7 @@ for pair in "${baselines[@]}"; do
 done
 
 cp "$OUT/good/summary.md" "$OUT/summary.md"
+if [ -f "$OUT/faults/coverage.md" ]; then { echo; cat "$OUT/faults/coverage.md"; } >> "$OUT/summary.md"; fi
 for die in "${SHMOO_DIES[@]}"; do cp "$OUT/shmoo_$die/shmoo.svg" "$OUT/shmoo_$die.svg"; done
 if [ "$status" -eq 0 ]; then echo "== regress: PASS"; else echo "== regress: FAIL"; fi
 exit "$status"

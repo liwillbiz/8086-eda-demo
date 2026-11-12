@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "i8086/testprog/runner.hpp"
+#include "coverage.hpp"
 #include "shmoo.hpp"
 
 namespace {
@@ -33,10 +34,15 @@ void usage(std::ostream& os) {
   os << "usage: i86test [--spec FILE] [--die FILE] [--grade G[,G...]] [--vcc V[,V...]]\n"
         "               [--temp C[,C...]] [--tests SEL] [--out DIR] [--list]\n"
         "       i86test --shmoo [--spec FILE] [--die FILE] [--temp C] [--out DIR]\n"
+        "       i86test --coverage EXPECTED [--spec FILE] [--dies DIR] [--grade ...] [--vcc ...]\n"
+        "               [--temp ...] [--out DIR]\n"
         "  SEL: comma-separated ids, prefixes or ranges, e.g. 'A*,D1-D11' (default '*')\n"
         "  G:   8086, 8086-2, 8086-1 (default: all)\n"
         "  --shmoo writes shmoo.csv, shmoo.txt and shmoo.svg (VCC x MHz, design doc 6.5) and\n"
-        "          exits 1 if a cell inside a grade's spec box fails\n";
+        "          exits 1 if a cell inside a grade's spec box fails\n"
+        "  --coverage runs DIR/fault_*.yaml (default spec/dies) and every die EXPECTED lists, writes\n"
+        "          coverage.md and coverage.csv, and exits 1 unless each die's failing tests are\n"
+        "          exactly the ones EXPECTED lists for it\n";
 }
 
 }  // namespace
@@ -44,6 +50,7 @@ void usage(std::ostream& os) {
 int main(int argc, char** argv) {
   testprog::RunConfig cfg;
   bool list = false, shmoo = false;
+  std::filesystem::path coverage, dies_dir = "spec/dies";
   try {
     for (int i = 1; i < argc; ++i) {
       const std::string arg = argv[i];
@@ -62,6 +69,8 @@ int main(int argc, char** argv) {
         for (const auto& g : split(value())) cfg.grades.push_back(spec::parse_grade(g));
       } else if (arg == "--list") list = true;
       else if (arg == "--shmoo") shmoo = true;
+      else if (arg == "--coverage") coverage = value();
+      else if (arg == "--dies") dies_dir = value();
       else if (arg == "-h" || arg == "--help") {
         usage(std::cout);
         return 0;
@@ -99,6 +108,16 @@ int main(int argc, char** argv) {
       testprog::write_shmoo_svg(svg, r);
       std::cout << ascii.str();
       return r.box_fails() == 0 ? 0 : 1;
+    }
+    if (!coverage.empty()) {
+      testprog::CoverageConfig cc{cfg, dies_dir, coverage};
+      const auto r = testprog::run_coverage(cc, std::cout);
+      std::filesystem::create_directories(cfg.out_dir);
+      std::ofstream csv(cfg.out_dir / "coverage.csv");
+      testprog::write_coverage_csv(csv, r);
+      std::ofstream md(cfg.out_dir / "coverage.md");
+      testprog::write_coverage_md(md, r);
+      return r.ok() ? 0 : 1;
     }
     return testprog::run(cfg).ok() ? 0 : 1;
   } catch (const std::exception& e) {
