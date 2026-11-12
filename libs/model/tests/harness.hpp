@@ -44,6 +44,7 @@ class Harness {
 
   std::vector<uint8_t> mem;           // 1 MiB
   std::map<uint16_t, uint8_t> io_in;  // byte-wide I/O read map (missing = FFh)
+  uint8_t inta_type = 0xFF;            // driven on AD7-0 in every INTA cycle
   std::vector<Txn> txns;
   std::vector<EdgeLog> log;
 

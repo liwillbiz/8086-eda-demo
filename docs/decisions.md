@@ -77,7 +77,7 @@ interface choices M0 had to make where the design doc only sketched them.
   A shift or rotate with a count of 0 changes no flags. The count is never masked (D8).
 - **Interrupts.** `InterruptEntry::instruction_index` is the 0-based index of the instruction that raised the interrupt (INT n, INT 3, INTO, divide error), or of the instruction after which the single-step trap was taken. The divide error stacks the IP of the instruction **after** DIV/IDIV/AAM (D3). The IDIV quotient range is ±127 / ±32767: a quotient of −128 / −32768 raises type 0 on the 8086.
 - **Single step (TF).** A type-1 trap follows every instruction that *started* with TF = 1, except an instruction that itself entered an interrupt, HLT (the run stops), and any segment-register load (MOV sreg, POP sreg), which on the 8086 inhibits the trap for one instruction. So POPF setting TF traps after the *next* instruction, and IRET into a TF = 1 context traps after the first instruction there (D10).
-- **Known simplifications.** A REP string instruction runs to completion as one instruction; on silicon a TF trap can split it per iteration. A `Program` has no INTR, NMI, HOLD, or TEST# stimulus, so the golden cannot predict A4, A5, or D7 as-is. M8 will need an additive field on `Program` (for example, interrupt requests keyed by instruction index), which means a frozen-header review.
+- **Known simplifications.** A REP string instruction runs to completion as one instruction; on silicon a TF trap can split it per iteration. Until M8, a `Program` had no INTR, NMI, HOLD, or TEST# stimulus. M8 added `Program::interrupts` (see the M8 section).
 - **Tests** (`libs/golden/tests`): brief D1–D6 and D8–D11 vectors, a shift/rotate table, multiply/divide/BCD cases, control flow, strings, I/O capture, and the ROM loader. `flags_table_test.cpp` runs ADD/ADC/SUB/SBB/CMP/INC/DEC/NEG over every 8-bit operand pair (with and without CF in) and over 4 000 16-bit edge and fixed-seed random pairs. Results are checked against a reference written with plain signed arithmetic, and reported by the emulated program through PUSHF and OUT.
 
 ## M3 model choices
@@ -92,7 +92,7 @@ interface choices M0 had to make where the design doc only sketched them.
 - **Prefetch queue.** A word fetch runs from an even IP and a byte fetch from an odd IP, only when at least 2 bytes are free. The queue therefore stops at 5 bytes when the EU has consumed an odd number of bytes. A flush discards an in-flight fetch's data.
 - **EU** is a C++20 coroutine, so instruction code reads sequentially and suspends on queue bytes, bus cycles, and EU clocks. Clock counts are approximate and deterministic; the datasheet has none. Implemented: the §7.3 subset plus SBB (same ALU encoding group), INTO, single-step (TF), `0Fh` POP CS and `8Eh /1` MOV CS (these flush the queue and continue at the new CS:IP, unlike silicon, so that they match an instruction-level emulator), and `D6h` as SALC (AL = CF ? FFh : 00h, no trap). Everything else raises `UnimplementedInstruction`.
 - **Undefined flags**, for the golden owner's differential fuzz to mask or match: AND/OR/XOR clear AF; shifts leave AF unchanged; for shift counts above 1, OF follows the last single-bit step; DIV leaves all flags unchanged.
-- **Later milestones report `NotImplemented`** (Error, not Fail): INTR with IF = 1, a rising NMI edge, HOLD high (M8), and MN/MX# = 0 (M9).
+- **Later milestones report `NotImplemented`** (Error, not Fail): MN/MX# = 0 (M9). INTR with IF = 1, a rising NMI edge and HOLD high did so until M8.
 - **LogicBug** names in the core are `inc_clears_cf` and `shift_count_masked`. An unknown name throws `NotImplemented` (M7 adds more).
 - **`libs/model/tests/harness.{hpp,cpp}`** is a small memory-emulation driver: it decodes the address from the pins when ALE falls, serves memory and I/O, holds READY low, and controls data setup and hold. It shows the input protocol `SimTester` (M4) needs to follow.
 
@@ -150,7 +150,7 @@ interface choices M0 had to make where the design doc only sketched them.
   - **C5:** ICC after the checksum at the grade's Fmax, at the matrix point.
   - **C6:** the functional suite at the matrix point, plus the highest applied voltage against V_PIN and TA against TA_BIAS.
   - **C7:** CLK at VCH 3.9 / VCL 0.6 V, then a search for each CLK switching point.
-- **B6 (TINVCH) is deferred to M8.** The model's INTR with IF = 1, NMI and HOLD throw `NotImplemented` until M8, so B6 is not registered yet.
+- **B6 (TINVCH) was deferred to M8**, because the model's INTR with IF = 1, NMI and HOLD threw `NotImplemented` until then.
 - **Values the `Spec` API does not expose.** `conditions:` (AC_CL = 100 pF, VCC 4.5–5.5 V) is not reachable through `spec::Spec`; M4 left `Spec::condition()` unadded. B5 hard-codes 100 pF and the shmoo hard-codes the 4.5–5.5 V box, each citing `spec.yaml conditions`. Adding `Spec::condition()` would remove both.
 - **Shmoo** (`testprog/src/shmoo.cpp`, writers in `testprog/report/shmoo.cpp`, `i86test --shmoo`):
   - **Grid:** VCC 4.0–6.0 V in 0.25 V steps (clamped to V_PIN) × 2–12 MHz in 1 MHz steps plus 12.5 MHz (TCLCL 80 ns), at 25 °C (or the first `--temp`).
@@ -175,4 +175,38 @@ interface choices M0 had to make where the design doc only sketched them.
   - Each timing or electrical fault is caught by the margin test aimed at it (B3, B4, B5, C3, C4) and nothing else, unless it also breaks functional runs.
   - At-speed faults (stuck pins, slow_rd at 8086-1, slow_all and lowvcc at 4.5 V) fail every test that runs a program. A1 and the DC tests stay green where they run no program.
   - C6 also catches both LogicBugs, because it runs the D-suite at the corners.
-  - B6 is not in any set: it is deferred to M8, so INTR setup faults have no test yet.
+  - B6 was not in any set until M8 added it and `fault_setup_intr`.
+
+## M8 interrupt, HOLD and HLT choices
+
+- **Golden stimulus (frozen header, additive).** `golden::Program::interrupts` is a list of `InterruptRequest {instruction_index, nmi, type}`, documented in `emulator.hpp`.
+  - A request is pending from the boundary before instruction `instruction_index` until it is taken. NMI is taken at the next boundary. INTR is taken at the first boundary with IF = 1, and taking it clears it, like an 8259 acknowledge. NMI goes first.
+  - The boundary after STI, MOV SS or POP SS takes none (brief §Interrupts). Single step still uses the wider M2 rule (any segment load); see the cross-layer note below.
+  - `kDuringHalt` names a request that arrives while the CPU is halted. HLT then wakes if the request can be taken (NMI, or INTR with IF = 1). A masked INTR leaves the CPU halted.
+  - REP stays one instruction. A request that silicon takes between iterations is placed at the REP's index. Because silicon stacks the IP of the REP prefix, the observation is the same: the same I/O, and the same non-stack writes in the same order. D7 relies on this.
+- **Model** (`libs/model/src/behavioral`).
+  - The rising edge samples HOLD, NMI and INTR with the TINVCH setup. A sample inside the window reads X: HOLD keeps its last state, NMI sees no edge, and INTR no request, so a late change is recognized one CLK later.
+  - NMI latches on a 0→1 edge. INTR is a level checked at each instruction boundary when IF = 1, except in the shadow after STI, MOV SS or POP SS.
+  - INTR runs two back-to-back INTA cycles. INTA# is the strobe and AD floats in T1. The type comes from the second cycle's low byte.
+  - REP checks for a pending interrupt after each iteration with CX ≠ 0. If one is waiting, it rewinds IP to the first prefix and leaves the instruction.
+  - HLT waits on the bus until an NMI or an unmasked INTR arrives, then resumes after HLT.
+  - HOLD is honoured at T4 or Ti, so the current cycle finishes first. HLDA rises TCHCTV after CLK high. AD, A19–A16, BHE#, RD#, WR#, M/IO#, DT/R# and DEN# float (TCLAZ). INTA# and ALE stay driven, and no bus cycle starts. When HOLD drops, HLDA falls and the strobes return high before the next T1.
+  - RESET clears every new state.
+- **Tester (frozen header, additive).** `RunOpts::stimuli` is a list of `PinStimulus {pin, high, clk, at_ns}`, and `RunOpts::inta_type` is the byte to serve. Only INTR, NMI, HOLD and TEST_N may be driven. `at_ns` is measured from the CLK's falling edge and must lie inside the period; it defaults to the pin's drive time.
+  - The tester serves `inta_type` on AD7–AD0 in the second of each pair of INTA cycles, then drops INTR, like an 8259.
+  - With stimuli, only a halt seen in a CLK after the last stimulus stops the run. A wake-up stimulus must come at least 3 CLKs after the halt. The halt is visible for about 2 CLKs: the model's Halt status, then the decoder's Halt transaction.
+- **Tests.** Each is a `RomCase`; the M8 ones override the new `RomCase::execute()`. Shared helpers live in `testprog/src/interrupts.{hpp,cpp}`.
+  - **A4:** INTR high from CLK 0 with type 40h. The STI shadow lets `MOV BX` run first. The test checks two back-to-back INTA cycles, the type byte 40h, the vector read at 00100h, stacked CS:IP and FLAGS, and IF and TF clear in the handler.
+  - **A5:** a first pass finds the halt CLK. The second pass raises NMI 4 CLKs later and holds it high. The checks are one type-2 vector fetch on the bus, a handler count of 1 before and after a delay loop, and the stacked IP after HLT.
+  - **A6:** HOLD rises half way through a memory-heavy ROM and falls 24 CLKs later. HLDA must not cut a cycle, no cycle may start while HLDA is high, and the bus pins must be Z. The golden diff checks the results; no golden stimulus is needed.
+  - **A7:** a Halt bus cycle comes before a 2-CLK NMI pulse, then one type-2 entry, the report order, and the stacked IP after HLT.
+  - **D7:** INTR rises at the 20th destination write of a 64-byte REP MOVSB. The golden request index is found by stepping the golden until it reaches the REP offset the ROM reports. The checks are the stacked IP equal to the REP prefix, CX plus bytes copied equal to 64 in the handler, CX = 0, SI and DI, and the copied data.
+  - **D10:** POPF sets TF. There are three type-1 vector fetches, the stacked IPs of the three NOPs' successors, TF clear in each handler, and TF clear afterwards.
+  - **B6:** with the CPU halted, NMI, then INTR (type 42h), changes `setup` ns before a CLK rising edge. The reference is the wake-up latency in CLKs with a full CLK-low phase of setup; a run passes if its latency matches. A 0.25 ns search between that and a change just before the next falling edge gives `nmi_setup_required` and `intr_setup_required`, judged against TINVCH min.
+    - The good die needs 10.83 ns at 8086-1, 4.5 V, 70 °C (8 ns × k), against 15 ns. The marginal die (TINVCH 10) needs 13.36 ns.
+- **`fault_setup_intr`:** `SetupDegrade input: intr, add_ns: 10`. The `intr` class covers INTR, NMI and HOLD, so the requirement rises to about 20.7 ns. B6 catches it at 8086-2 and 8086-1 (15 ns), and it passes at 8086 (30 ns). No other test puts these inputs near an edge.
+- **Coverage.** The five broad dies (stuck_ad3, stuck_wr_n, slow_rd, slow_all, lowvcc) now also list A4–A7, B6, D7 and D10, because every program fails on them. The other dies' sets are unchanged, and `fault_setup_intr` is caught by exactly [B6]. `good_results.csv` gains 7 × 18 passing rows. The shmoo baselines are unchanged.
+- **Cross-layer notes.**
+  - The golden inhibits the TF trap after any segment-register load (M2). The model and brief §Interrupts inhibit only after MOV SS and POP SS. No current ROM steps over a DS, ES or CS load with TF set, so nothing fails yet. For external interrupts, the golden now follows the brief.
+  - The tester's halt-stop rule needs wake-up stimuli at least 3 CLKs after the halt. An INTR that is never acknowledged (IF = 0) runs to `max_cycles`.
+  - `functional_suite()` (C6, B-margins) does not include the M8 ROMs. D10 could join without stimuli; the others need `RunOpts::stimuli`.

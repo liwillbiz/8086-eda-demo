@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -72,12 +73,28 @@ struct BusTrace {
   std::vector<BusTransaction> transactions;
 };
 
+// M8, additive: one level change on an asynchronous input (INTR, NMI, HOLD or TEST_N) in
+// run_program. It applies in CLK `clk` (0 = first CLK of the run, RESET included), at `at_ns`
+// after that CLK's falling edge, or at the pin's timing-set drive time when unset.
+struct PinStimulus {
+  std::string pin;
+  bool high = true;
+  uint64_t clk = 0;
+  std::optional<double> at_ns;
+};
+
 // Memory-emulation mode options.
 struct RunOpts {
   int timing_id = 0;
   uint64_t max_cycles = 1'000'000;
   int wait_states = 0;  // READY held low for this many Tw per bus cycle
+  // With stimuli, only a halt seen in a CLK after the last stimulus stops the run; a stimulus
+  // meant to wake the CPU must come at least 3 CLKs after the halt.
   bool stop_on_halt = true;
+  // M8, additive. Like an 8259: the tester drives `inta_type` on AD7-AD0 in the second of
+  // each pair of INTA cycles and drops INTR after it.
+  std::vector<PinStimulus> stimuli;
+  uint8_t inta_type = 0;
 };
 
 enum class Transition { Rise, Fall };

@@ -39,7 +39,7 @@ Verdict expect_word(TestContext& ctx, std::string param, std::optional<uint16_t>
 
 Verdict RomCase::run(TestContext& ctx) {
   setup_functional(ctx);
-  const RomRun r = run_rom(ctx, rom_name());
+  const RomRun r = execute(ctx);
 
   Verdict v = check(ctx, "halted", r.actual.halted ? 1 : 0, exact(1, ref()),
                     r.actual.halted ? "" : std::format("no HLT within {} CLK", r.result.cycles));

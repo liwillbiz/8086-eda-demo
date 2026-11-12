@@ -87,7 +87,9 @@ struct RomRun {
 };
 
 // Runs `rom_name` on ctx.golden and on ctx.t (timing set 0, see setup_functional).
-RomRun run_rom(TestContext&, std::string_view rom_name, const tester::RunOpts& = {});
+// `interrupts` is the golden view of the external requests in opts.stimuli.
+RomRun run_rom(TestContext&, std::string_view rom_name, const tester::RunOpts& = {},
+               std::span<const golden::InterruptRequest> interrupts = {});
 
 // Datalog helpers. A functional check is logged as a value judged against [min, max].
 spec::Limit exact(double value, std::string ref, std::string unit = "");

@@ -69,6 +69,8 @@ class Cpu {
   uint16_t port_in(uint16_t port, bool word) const;
 
   void interrupt(uint8_t type);
+  void take_external();
+  bool wake_from_halt();
   void jump_rel(uint16_t disp);
 
   std::vector<uint8_t> mem_;
@@ -85,6 +87,14 @@ class Cpu {
   uint8_t rep_ = 0;  // 0, 0xF2 (REPNE) or 0xF3 (REP/REPE)
   bool interrupted_ = false;
   bool inhibit_trap_ = false;
+  bool shadow_ = false;  // the next boundary takes no external interrupt
+
+  struct Request {
+    InterruptRequest req;
+    bool arrived = false;  // during a halt
+    bool taken = false;
+  };
+  std::vector<Request> requests_;
 };
 
 }  // namespace i8086::golden::detail

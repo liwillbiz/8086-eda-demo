@@ -241,6 +241,25 @@ TEST(SimTester, RunProgramPreconditions) {
   RunOpts bad;
   bad.wait_states = -1;
   EXPECT_THROW(r.t->run_program(image(), bad), std::invalid_argument);
+  RunOpts reset_pin;
+  reset_pin.stimuli.push_back({.pin = "RESET", .high = true, .clk = 10, .at_ns = {}});
+  EXPECT_THROW(r.t->run_program(image(), reset_pin), std::invalid_argument);
+  RunOpts late;
+  late.stimuli.push_back({.pin = "NMI", .high = true, .clk = 10, .at_ns = 1000.0});
+  EXPECT_THROW(r.t->run_program(image(), late), std::invalid_argument);
+}
+
+TEST(SimTester, HaltWaitsForScheduledStimuli) {
+  Rig r = make_rig(program());
+  power_up(*r.t);
+  const FunctionalResult plain = r.t->run_program(image(), RunOpts{});
+  ASSERT_TRUE(plain.pass);
+  RunOpts opts;
+  opts.max_cycles = plain.cycles + 50;
+  opts.stimuli.push_back({.pin = "TEST_N", .high = true, .clk = plain.cycles + 20, .at_ns = {}});
+  const FunctionalResult res = r.t->run_program(image(), opts);
+  EXPECT_TRUE(res.pass);  // the fake stays halted: the run ends in the CLK after the stimulus
+  EXPECT_EQ(res.cycles, plain.cycles + 22);
 }
 
 TEST(SimTester, LevelsGuardedByAbsMax) {

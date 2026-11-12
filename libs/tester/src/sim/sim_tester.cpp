@@ -1,5 +1,6 @@
 #include "i8086/tester/sim_tester.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <stdexcept>
 #include <string>
@@ -202,6 +203,11 @@ FunctionalResult SimTester::run_program(const MemoryImage& image, const RunOpts&
   }
   if (opts.wait_states < 0) throw std::invalid_argument("run_program: wait_states must be >= 0");
   if (opts.max_cycles == 0) throw std::invalid_argument("run_program: max_cycles must be > 0");
+  for (const PinStimulus& st : opts.stimuli) {
+    if (st.pin != "INTR" && st.pin != "NMI" && st.pin != "HOLD" && st.pin != "TEST_N") {
+      throw std::invalid_argument("run_program: stimulus pin must be INTR, NMI, HOLD or TEST_N, not " + st.pin);
+    }
+  }
 
   const auto ts = timings_.find(opts.timing_id);
   const ResolvedTiming rt =
@@ -211,8 +217,12 @@ FunctionalResult SimTester::run_program(const MemoryImage& image, const RunOpts&
   Engine eng(spec_, *dut_, electrical_, levels_, temp_c_);
   BusDecoder decoder;
   const auto& bp = eng.bus();
-  const int reset = eng.pin_num("RESET"), ready = eng.pin_num("READY");
+  const int reset = eng.pin_num("RESET"), ready = eng.pin_num("READY"), intr = eng.pin_num("INTR");
   const auto wait_states = static_cast<uint64_t>(opts.wait_states);
+  uint64_t last_stimulus = 0;
+  for (const PinStimulus& st : opts.stimuli) last_stimulus = std::max(last_stimulus, st.clk);
+  uint64_t inta_cycles = 0;
+  bool drop_intr = false;
 
   std::map<uint32_t, uint8_t> mem = image.bytes();
   std::map<uint32_t, uint8_t> io;
@@ -236,6 +246,19 @@ FunctionalResult SimTester::run_program(const MemoryImage& image, const RunOpts&
       for (const char* name : {"INTR", "NMI", "HOLD", "TEST_N"}) eng.drive(eng.pin_num(name), 0, '0');
     }
     if (k == kResetClocks) eng.drive(reset, t0 + drive_at(reset), '0');
+    if (drop_intr) {
+      eng.drive(intr, t0 + drive_at(intr), '0');
+      drop_intr = false;
+    }
+    for (const PinStimulus& st : opts.stimuli) {
+      if (st.clk != k) continue;
+      const int pin = eng.pin_num(st.pin);
+      const int64_t at = st.at_ns ? static_cast<int64_t>(std::llround(*st.at_ns * 1000.0)) : drive_at(pin);
+      if (at < 0 || at >= rt.period_ps) {
+        throw std::invalid_argument("run_program: stimulus at_ns must lie inside its CLK period");
+      }
+      eng.drive(pin, t0 + at, st.high ? '1' : '0');
+    }
     if (release) {
       for (int pin : bp.ad) eng.drive(pin, t0, 'Z');
       release = false;
@@ -265,15 +288,24 @@ FunctionalResult SimTester::run_program(const MemoryImage& image, const RunOpts&
         }
         serving = true;
       }
+      if (o->kind == BusDecoder::Open::Kind::Inta && k == o->t1 + 2 && inta_cycles % 2 == 1) {
+        for (int bit = 0; bit < 8; ++bit) {
+          const int pin = bp.ad[static_cast<std::size_t>(bit)];
+          eng.drive(pin, t0 + drive_at(pin), ((opts.inta_type >> bit) & 1) ? '1' : '0');
+        }
+        serving = true;
+      }
     }
 
     eng.clock();
     for (BusTransaction& tx : decoder.end_period(eng)) {
       using T = model::BusCycleType;
-      if (serving && (tx.type == T::MemRead || tx.type == T::CodeFetch || tx.type == T::IoRead)) {
+      if (serving && (tx.type == T::MemRead || tx.type == T::CodeFetch || tx.type == T::IoRead ||
+                      tx.type == T::InterruptAck)) {
         release = true;
         serving = false;
       }
+      if (tx.type == T::InterruptAck && ++inta_cycles % 2 == 0) drop_intr = true;
       if (tx.type == T::MemWrite || tx.type == T::IoWrite) {
         auto& space = tx.type == T::MemWrite ? mem : io;
         const uint32_t mask = tx.type == T::MemWrite ? MemoryImage::kAddressMask : kIoAddressMask;
@@ -285,10 +317,11 @@ FunctionalResult SimTester::run_program(const MemoryImage& image, const RunOpts&
       txs.push_back(tx);
     }
     const bool model_halted = eng.bus_state().cycle == model::BusCycleType::Halt;
-    if (model_halted && opts.stop_on_halt) {
+    const bool stimulus_ahead = !opts.stimuli.empty() && last_stimulus >= k;
+    if (model_halted && opts.stop_on_halt && !stimulus_ahead) {
       for (auto& tx : decoder.flush(eng)) txs.push_back(tx);
     }
-    halted = halted || model_halted;
+    halted = (halted || model_halted) && !stimulus_ahead;
     eng.end_period();
     ++result.cycles;
     if (halted && opts.stop_on_halt) break;

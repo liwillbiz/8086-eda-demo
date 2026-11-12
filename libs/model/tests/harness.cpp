@@ -45,6 +45,7 @@ uint16_t Harness::ad_levels() const {
 }
 
 uint16_t Harness::read_word(const BusState& b) const {
+  if (b.cycle == BusCycleType::InterruptAck) return inta_type;
   if (b.cycle == BusCycleType::IoRead) {
     const auto port = static_cast<uint16_t>(ale_addr_ & 0xFFFE);
     auto get = [&](uint16_t p) {
@@ -68,6 +69,7 @@ std::vector<InputSample> Harness::inputs_for(Edge next, int64_t edge_t) {
   for (const auto& [name, v] : force) set(pin(name), v, prev);
   const BusState b = dut->bus_state();
   const bool reading = b.cycle == BusCycleType::CodeFetch || b.cycle == BusCycleType::MemRead ||
+                       b.cycle == BusCycleType::InterruptAck ||
                        b.cycle == BusCycleType::IoRead;
   if (next == Edge::Rising && (state_ == TState::T3 || state_ == TState::Tw)) {
     const bool high = tw_ >= wait_states;

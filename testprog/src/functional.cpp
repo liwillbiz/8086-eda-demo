@@ -147,12 +147,15 @@ std::vector<std::string> diff(const Observation& g, const Observation& d, const 
   return out;
 }
 
-RomRun run_rom(TestContext& ctx, std::string_view rom_name, const tester::RunOpts& opts) {
+RomRun run_rom(TestContext& ctx, std::string_view rom_name, const tester::RunOpts& opts,
+               std::span<const golden::InterruptRequest> interrupts) {
   const auto bytes = rom(rom_name);
   if (!ctx.golden) throw std::logic_error("run_rom: no golden emulator in the test context");
 
   RomRun run;
-  run.golden = ctx.golden->run(golden::rom_program({bytes.begin(), bytes.end()}));
+  golden::Program program = golden::rom_program({bytes.begin(), bytes.end()});
+  program.interrupts.assign(interrupts.begin(), interrupts.end());
+  run.golden = ctx.golden->run(program);
   if (run.golden.stop != golden::StopReason::Halt) {
     throw std::runtime_error(std::format("golden emulator did not halt on ROM {} (stop reason {})",
                                          rom_name, static_cast<int>(run.golden.stop)));

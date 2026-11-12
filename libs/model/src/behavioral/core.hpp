@@ -6,7 +6,8 @@
 //  - Every T-state starts on a CLK falling edge. clock_edge(Falling) advances the
 //    BIU (T1→T2→T3→[Tw…]→T4→T1/Ti) and runs the EU for one clock.
 //  - clock_edge(Rising) samples RESET, READY (T3/Tw), INTR, NMI, HOLD, MN/MX#,
-//    ends the ALE pulse, commits read data, and decides the next bus cycle.
+//    ends the ALE pulse, commits read data, enters or leaves HOLD, and decides the next
+//    bus cycle.
 //  - Read data is latched on the falling edge that starts T4 (TDVCL/TCLDX).
 
 #include <array>
@@ -116,20 +117,21 @@ class Core final : public DeviceModel {
     void await_suspend(std::coroutine_handle<> h) noexcept;
     uint16_t await_resume() const noexcept { return c->eu_data_; }
   };
-  struct ForeverAwait {
+  struct HaltAwait {  // until NMI or INTR with IF = 1 (RESET restarts the EU)
     Core* c;
     bool await_ready() const noexcept { return false; }
     void await_suspend(std::coroutine_handle<> h) noexcept;
     void await_resume() const noexcept {}
   };
 
-  enum class Wait : uint8_t { None, Start, Clocks, Queue, Bus, Forever };
+  enum class Wait : uint8_t { None, Start, Clocks, Queue, Bus, Halt };
 
   // ---- pins (core_biu.cpp) ----
   void drive(int pin, Logic v, int64_t delay_ps);
   void drive_ad(uint16_t value, int64_t delay_ps);
   void float_ad(int64_t delay_ps);
   void drive_a(uint8_t nibble, int64_t delay_ps);
+  int strobe_of(const BusReq& r) const { return r.type == BusCycleType::InterruptAck ? pins_.inta_n : pins_.rd_n; }
   Logic sample(int pin, int64_t setup_ps) const;
   void watch_hold(int pin, Logic* slot, int64_t hold_ps);
   int64_t edge_gap_ps() const;
@@ -140,6 +142,9 @@ class Core final : public DeviceModel {
   void enter_reset();
   void release_reset();
   void decide_next();
+  void drive_status(const BusReq&);
+  void enter_hold();
+  void leave_hold();
   void start_t1();
   void commit_read();
   BusReq make_prefetch() const;
@@ -155,6 +160,8 @@ class Core final : public DeviceModel {
   Task<> exec_shift(uint8_t op, uint8_t modrm);
   Task<> exec_string(uint8_t op);
   Task<> interrupt(uint8_t type);
+  Task<> acknowledge_intr();
+  bool interrupt_waiting() const;
 
   struct Ea {
     bool is_reg = false;
@@ -221,6 +228,7 @@ class Core final : public DeviceModel {
   std::vector<HoldWatch> watches_;
   Edge last_edge_ = Edge::Falling;
   Logic nmi_prev_ = Logic::L0;
+  bool hold_req_ = false;  // HOLD as last sampled cleanly (an X sample keeps it)
 
   // ---- output pins ----
   std::vector<Logic> out_;
@@ -237,6 +245,7 @@ class Core final : public DeviceModel {
   bool discard_ = false;    // current prefetch belongs to a flushed queue
   bool committed_ = false;  // current cycle already handed its data over (T4 rising)
   bool ad_driven_ = false;  // AD carries write data that must float in Ti
+  bool holding_ = false;    // HLDA high, bus floated
   Logic ready_latch_ = Logic::L1;
   std::array<Logic, 16> ad_latch_{};
   std::array<Logic, 16> ad_driven_at_latch_{};
@@ -261,7 +270,10 @@ class Core final : public DeviceModel {
   uint16_t flags_ = 0;
   bool halted_ = false;
   bool intr_latched_ = false;
+  bool nmi_pending_ = false;  // a rising NMI edge not yet serviced
   bool inhibit_ = false;  // after MOV/POP SS: no trap check after the next instruction
+  bool shadow_ = false;   // after STI or MOV/POP SS: the next boundary takes no interrupt
+  uint16_t insn_ip_ = 0;  // IP of the current instruction's first prefix
   int seg_override_ = -1;
   uint8_t rep_ = 0;
 };

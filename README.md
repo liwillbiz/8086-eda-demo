@@ -9,14 +9,16 @@ characterization.
 - Device facts: [`docs/8086-reference-brief.md`](docs/8086-reference-brief.md)
 - Decisions: [`docs/decisions.md`](docs/decisions.md)
 
-**Status: M7 (fault injection and coverage).** On top of M5 (A1–A3, D1–D6, D8, D9, D11
-with golden diff and differential fuzz) and M6 (B1–B5 and C1–C7 margins, shmoo), the
-`FaultInjector` applies every design §4.2 fault from `spec/dies/*.yaml`. Each of the 11
+**Status: M8 (interrupts, HOLD and HLT).** On top of M5 (A1–A3, D1–D6, D8, D9, D11 with
+golden diff and differential fuzz), M6 (B1–B5 and C1–C7 margins, shmoo) and M7 (fault
+injection and coverage), the model now handles INTR/INTA, the NMI edge, HOLD/HLDA bus float,
+HLT wake-up and interruptible REP. The tester drives timed INTR/NMI/HOLD stimuli
+(`RunOpts::stimuli`) and serves the INTA type byte, and the golden takes matching
+`Program::interrupts`. A4–A7, B6 (TINVCH), D7 and D10 are registered. Each of the 12
 `spec/dies/fault_*.yaml` dies must be caught by exactly the tests `regression/expected.yaml`
-lists for it, and `./regress` adds that fault-coverage table to `out/summary.md`.
-`spec/dies/good.yaml` and `spec/dies/marginal.yaml` pass every test at every grade × VCC × TA
-point. `./regress` diffs the results matrix and both dies' shmoos against
-`regression/baselines/`. B6 waits for interrupts in the model (M8).
+lists for it; `fault_setup_intr` is caught by B6 alone. `spec/dies/good.yaml` and
+`spec/dies/marginal.yaml` pass every test at every grade × VCC × TA point. `./regress` diffs the
+results matrix and both dies' shmoos against `regression/baselines/`. Max mode is M9.
 
 ## The four layers
 

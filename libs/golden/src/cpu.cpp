@@ -35,6 +35,7 @@ Cpu::Cpu(const Program& program, Result& out)
   s_ = {reset.es, reset.cs, reset.ss, reset.ds};
   ip_ = reset.ip;
   flags_ = static_cast<uint16_t>(reset.flags & kFlagsMask);
+  for (const auto& r : program.interrupts) requests_.push_back({r});
 }
 
 void Cpu::run(uint64_t max_instructions) {
@@ -60,6 +61,7 @@ void Cpu::run(uint64_t max_instructions) {
 }
 
 Cpu::Step Cpu::step() {
+  if (!std::exchange(shadow_, false)) take_external();
   start_ip_ = ip_;
   seg_override_ = -1;
   rep_ = 0;
@@ -82,7 +84,7 @@ Cpu::Step Cpu::step() {
 
   if (op == 0xF4) {  // HLT: IP is left past the HLT, as on the chip.
     ++out_.instructions;
-    return Step::Halt;
+    return wake_from_halt() ? Step::Continue : Step::Halt;
   }
   execute(op);
   if (trap && !interrupted_ && !inhibit_trap_) interrupt(1);
@@ -413,8 +415,9 @@ void Cpu::group3(const Operand& o, bool word) {
 
 // ---- strings, I/O, interrupts ----------------------------------------------------------------
 
-// A4-A7, AA-AF. With a REP prefix the whole repetition is one instruction (no external
-// interrupts reach the golden, so it is never suspended mid-string).
+// A4-A7, AA-AF. With a REP prefix the whole repetition is one instruction. An external
+// interrupt requested at its index is taken before it, which stacks the same IP (the
+// prefix) and leaves the same final state as silicon suspending the string (D7).
 void Cpu::string_op(uint8_t op) {
   const bool word = (op & 1) != 0;
   const uint32_t size = word ? 2 : 1;
@@ -485,6 +488,42 @@ void Cpu::interrupt(uint8_t type) {
   ip_ = rd16(0, vec);
   s_[CS] = rd16(0, static_cast<uint16_t>(vec + 2u));
   interrupted_ = true;
+}
+
+void Cpu::take_external() {
+  const auto due = [&](const Request& r) {
+    return !r.taken && (r.arrived || r.req.instruction_index <= out_.instructions);
+  };
+  for (Request& r : requests_) {
+    if (due(r) && r.req.nmi) {
+      r.taken = true;
+      interrupt(2);
+      return;
+    }
+  }
+  if (!flag(kIF)) return;
+  for (Request& r : requests_) {
+    if (due(r)) {
+      r.taken = true;
+      interrupt(r.req.type);
+      return;
+    }
+  }
+}
+
+// A request that can be taken ends the halt; one not yet due arrives now.
+bool Cpu::wake_from_halt() {
+  const auto can_take = [&](const Request& r) { return !r.taken && (r.req.nmi || flag(kIF)); };
+  for (const Request& r : requests_) {
+    if (can_take(r) && (r.arrived || r.req.instruction_index <= out_.instructions)) return true;
+  }
+  for (Request& r : requests_) {
+    if (can_take(r)) {
+      r.arrived = true;
+      return true;
+    }
+  }
+  return false;
 }
 
 void Cpu::jump_rel(uint16_t disp) { ip_ = lo16(ip_ + disp); }
@@ -559,6 +598,7 @@ void Cpu::execute(uint8_t op) {
     case 0x07: case 0x0F: case 0x17: case 0x1F:  // 0F is POP CS on the 8086 (brief D11)
       s_[op >> 3] = pop();
       inhibit_trap_ = true;
+      if (op == 0x17) shadow_ = true;
       return;
     case 0x27:
     case 0x2F: {  // DAA / DAS
@@ -640,6 +680,7 @@ void Cpu::execute(uint8_t op) {
       const Operand o = modrm();
       s_[o.reg & 3] = lo16(read_op(o, true));
       inhibit_trap_ = true;
+      if ((o.reg & 3) == SS) shadow_ = true;
       return;
     }
     case 0x8F: {
@@ -783,7 +824,11 @@ void Cpu::execute(uint8_t op) {
     case 0xF5: set_flag(kCF, !flag(kCF)); return;
     case 0xF6: case 0xF7: group3(modrm(), word); return;
     case 0xF8: case 0xF9: set_flag(kCF, op == 0xF9); return;
-    case 0xFA: case 0xFB: set_flag(kIF, op == 0xFB); return;
+    case 0xFA: set_flag(kIF, false); return;
+    case 0xFB:
+      set_flag(kIF, true);
+      shadow_ = true;
+      return;
     case 0xFC: case 0xFD: set_flag(kDF, op == 0xFD); return;
     case 0xFE: {
       const Operand o = modrm();
