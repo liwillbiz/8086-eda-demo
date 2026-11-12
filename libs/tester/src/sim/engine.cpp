@@ -103,6 +103,16 @@ void Engine::drive(int pin, int64_t t, char c) {
 std::string_view Engine::pin_name(int num) const { return pin(num).name; }
 
 void Engine::edge(model::Edge e, int64_t t) {
+  // The DUT sees an edge only when CLK crosses its CLK threshold: a level on the wrong side
+  // of it (or inside its band) leaves the DUT's clock where it was.
+  const Logic want = e == model::Edge::Rising ? Logic::L1 : Logic::L0;
+  const Logic clk = electrical_.input_level("CLK", e == model::Edge::Rising ? levels_.vch : levels_.vcl, cond_);
+  if (clk != want || dut_clk_ == want) {
+    if (clk == Logic::L0 || clk == Logic::L1) dut_clk_ = clk;
+    tester_[idx(clk_pin_)].set(t, clk);
+    return;
+  }
+  dut_clk_ = want;
   std::vector<model::InputSample> in;
   in.reserve(input_pins_.size());
   for (int p : input_pins_) {
@@ -120,7 +130,9 @@ void Engine::edge(model::Edge e, int64_t t) {
       throw std::logic_error("DeviceModel drove non-output pin " + p.name);
     }
     const double delay = static_cast<double>(std::max<int64_t>(0, ev.delay_ps)) * derate_;
-    dut_[idx(ev.pin)].set(t + std::llround(delay), ev.value);
+    const bool driven = ev.value == Logic::L0 || ev.value == Logic::L1;
+    const int64_t load = driven ? electrical_.load_delay_ps(p.name, levels_.cl_pf) : 0;
+    dut_[idx(ev.pin)].set(t + std::llround(delay) + load, ev.value);
   }
   tester_[idx(clk_pin_)].set(t, e == model::Edge::Rising ? Logic::L1 : Logic::L0);
 }

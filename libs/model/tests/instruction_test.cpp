@@ -285,5 +285,27 @@ TEST(Instr, OutsideSubsetRaisesUnimplemented) {
   h.clock();
 }
 
+// A tester's next run starts with RESET undriven at the first edge: that edge neither
+// clears the fault nor raises it again; RESET low raises it, RESET high clears it.
+TEST(Instr, UndrivenResetNeitherClearsNorRaisesAFault) {
+  Harness h;
+  h.boot({0x27});
+  h.reset();
+  EXPECT_THROW(
+      {
+        for (int i = 0; i < 1000; ++i) h.clock();
+      },
+      UnimplementedInstruction);
+  const InputSample undriven{h.pin("RESET"), Logic::Z, -1000};
+  h.dut->set_inputs({&undriven, 1});
+  EXPECT_TRUE(h.dut->clock_edge(Edge::Falling).empty());
+  const InputSample low{h.pin("RESET"), Logic::L0, -1000};
+  h.dut->set_inputs({&low, 1});
+  EXPECT_THROW(h.dut->clock_edge(Edge::Rising), UnimplementedInstruction);
+  h.boot({0x90});
+  h.reset();
+  EXPECT_TRUE(h.run_until_halt());
+}
+
 }  // namespace
 }  // namespace i8086::model::test

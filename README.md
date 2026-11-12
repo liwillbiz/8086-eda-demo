@@ -9,11 +9,13 @@ characterization.
 - Device facts: [`docs/8086-reference-brief.md`](docs/8086-reference-brief.md)
 - Decisions: [`docs/decisions.md`](docs/decisions.md)
 
-**Status: M5 (test program v1).** The golden emulator (M2), device model (M3) and tester
-(M4) are integrated. Tests A1–A3, D1–D6, D8, D9 and D11 pass on the good die at every grade ×
-VCC × TA point, a model-vs-golden differential fuzz runs under `ctest`, and `./regress` diffs
-the results matrix against `regression/baselines/good_results.csv`. Later milestones' tests
-are not registered yet.
+**Status: M6 (timing and electrical margins, shmoo).** On top of M5 (A1–A3, D1–D6, D8, D9,
+D11 with golden diff and differential fuzz), the B-suite (B1–B5) and C-suite (C1–C7) measure
+the die's real edges with searches and judge them against `spec.yaml`. `spec/dies/good.yaml`
+and `spec/dies/marginal.yaml` both pass every test at every grade × VCC × TA point.
+`i86test --shmoo` writes a VCC × frequency shmoo (CSV, ASCII, SVG). `./regress` diffs the
+results matrix and both dies' shmoos against `regression/baselines/`. B6 waits for interrupts
+in the model (M8).
 
 ## The four layers
 
@@ -46,13 +48,14 @@ test ROMs; `apt install nasm` / `brew install nasm`), and network access on the 
 (FetchContent downloads yaml-cpp and GoogleTest).
 
 ```bash
-./regress                  # configure + build + unit tests + test matrix + baseline diff
+./regress                  # build + unit tests + test matrix + shmoo (good, marginal) + baseline diff
 ./regress --accept         # same, then update regression/baselines/ (review the diff in the PR)
 
 cmake --workflow --preset dev          # debug build + unit tests only
 cmake --preset asan && cmake --build --preset asan && ctest --preset asan
 
 build/regress/testprog/i86test --list
+build/regress/testprog/i86test --shmoo --die spec/dies/marginal.yaml --out out/shmoo
 build/regress/testprog/i86test --die spec/dies/good.yaml --grade 8086-2 \
     --vcc 4.5,5.0,5.5 --temp 0,70 --tests 'A*,D1-D11' --out out/
 ```
@@ -70,7 +73,8 @@ libs/spec/       loader, validator, expressions        L1
 libs/model/      behavioral/, fault/, die profiles     L2
 libs/tester/     Tester API, sim/, electrical/         L3
 libs/golden/     independent instruction emulator      L4
-testprog/        include/, src/ (registry, runner, ROM harness, protocol checker), cases/A..E,
+testprog/        include/, src/ (registry, runner, ROM and margin harness, protocol checker,
+                 shmoo), cases/A..E,
                  roms/ (NASM test ROMs), patterns/ (.pat), report/, cli/
 regression/      expected.yaml, baselines/
 docs/            design, brief, decisions

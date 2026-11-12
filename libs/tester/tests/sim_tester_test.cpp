@@ -196,6 +196,43 @@ TEST(SimTester, DeratingScalesDutDelays) {
   EXPECT_DOUBLE_EQ(r.log->conditions.back().tclcl_ns, 200.0);
 }
 
+// B5: LevelSet::cl_pf adds ElectricalModel::load_delay_ps to every driven DUT edge.
+TEST(SimTester, LoadCapacitanceDelaysDrivenEdges) {
+  model::DieProfile die;
+  die.electrical = {{"load_slope_ns_per_pf", 0.05}};
+  Rig r = make_rig(program(), die);
+  LevelSet l;
+  l.cl_pf = 100;
+  r.t->set_levels(l);
+  r.t->set_temperature(25);
+  r.t->power(true);
+  ASSERT_TRUE(r.t->run_program(image(), RunOpts{}).pass);
+  EXPECT_NEAR(r.t->measure_time({"CLK", Transition::Fall, 11}, {"A19", Transition::Rise, 0}), 30.0 + 5.0, 1e-9);
+}
+
+// C7: a CLK level on the wrong side of the die's CLK threshold is no edge to the DUT.
+TEST(SimTester, ClkLevelsMustCrossTheClkThreshold) {
+  model::DieProfile die;
+  die.electrical = {{"vin_threshold_v.CLK", 2.0}, {"vin_band_v.CLK", 0.2}};
+  const auto run_with = [&](double vch, double vcl) {
+    Rig r = make_rig(program(), die);
+    LevelSet l;
+    l.vch = vch;
+    l.vcl = vcl;
+    r.t->set_levels(l);
+    r.t->set_temperature(25);
+    r.t->power(true);
+    RunOpts opts;
+    opts.max_cycles = 100;
+    const bool pass = r.t->run_program(image(), opts).pass;
+    return std::pair{pass, r.log->reads.size()};
+  };
+  EXPECT_EQ(run_with(3.9, 0.6), (std::pair{true, std::size_t{2}}));
+  EXPECT_EQ(run_with(2.05, 0.6), (std::pair{false, std::size_t{0}}));  // inside the band: X
+  EXPECT_EQ(run_with(3.9, 1.95), (std::pair{false, std::size_t{0}}));
+  EXPECT_EQ(run_with(2.1, 1.89), (std::pair{true, std::size_t{2}}));
+}
+
 TEST(SimTester, RunProgramPreconditions) {
   Rig r = make_rig(program());
   EXPECT_THROW(r.t->run_program(image(), RunOpts{}), std::logic_error);  // power off
@@ -220,6 +257,15 @@ TEST(SimTester, LevelsGuardedByAbsMax) {
   EXPECT_THROW(r.t->set_levels(l), std::out_of_range);
   l = LevelSet{};
   l.vcc = std::nan("");
+  EXPECT_THROW(r.t->set_levels(l), std::out_of_range);
+  l = LevelSet{};
+  l.vch = 7.5;
+  EXPECT_THROW(r.t->set_levels(l), std::out_of_range);
+  l = LevelSet{};
+  l.vcl = -1.5;
+  EXPECT_THROW(r.t->set_levels(l), std::out_of_range);
+  l = LevelSet{};
+  l.cl_pf = -1;
   EXPECT_THROW(r.t->set_levels(l), std::out_of_range);
 }
 

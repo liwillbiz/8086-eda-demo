@@ -99,6 +99,7 @@ class Engine {
   model::Conditions cond_;
   std::optional<model::Conditions> sent_cond_;
   double derate_ = 1.0;
+  model::Logic dut_clk_ = model::Logic::X;  // CLK level the DUT last saw (after its CLK threshold)
   uint64_t index_ = 0;
   int64_t start_ = 0;
 };

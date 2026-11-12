@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # One-command regression (design doc §8).
-#   ./regress            build, unit tests, test matrix on every die, baseline diff
+#   ./regress            build, unit tests, test matrix on every die, shmoo, baseline diff
 #   ./regress --accept   same, then overwrite regression/baselines/ (review the diff in your PR)
 set -euo pipefail
 
@@ -44,20 +44,32 @@ for die in "${fault_dies[@]}"; do
   "$BIN" --die "$die" --grade "$GRADES" --vcc "$VCC" --temp "$TEMP" --out "$OUT/$name" || true
 done
 
-echo "== [4/4] baseline diff"
+echo "== [4/4] shmoo (good, marginal) and baseline diff"
+SHMOO_DIES=(good marginal)
+for die in "${SHMOO_DIES[@]}"; do
+  "$BIN" --shmoo --die "spec/dies/$die.yaml" --out "$OUT/shmoo_$die" || status=1
+done
+
 mkdir -p regression/baselines
-if [ "$ACCEPT" -eq 1 ]; then
-  cp "$OUT/good/results.csv" regression/baselines/good_results.csv
-  echo "   accepted: regression/baselines/good_results.csv"
-elif [ -f regression/baselines/good_results.csv ]; then
-  if ! diff -u regression/baselines/good_results.csv "$OUT/good/results.csv"; then
-    echo "   results differ from baseline (run ./regress --accept if intended)"
-    status=1
+baselines=("$OUT/good/results.csv:good_results.csv")
+for die in "${SHMOO_DIES[@]}"; do baselines+=("$OUT/shmoo_$die/shmoo.csv:shmoo_$die.csv"); done
+for pair in "${baselines[@]}"; do
+  src=${pair%%:*}
+  base=regression/baselines/${pair##*:}
+  if [ "$ACCEPT" -eq 1 ]; then
+    cp "$src" "$base"
+    echo "   accepted: $base"
+  elif [ -f "$base" ]; then
+    if ! diff -u "$base" "$src"; then
+      echo "   $src differs from $base (run ./regress --accept if intended)"
+      status=1
+    fi
+  else
+    echo "   (no baseline $base yet)"
   fi
-else
-  echo "   (no baselines yet)"
-fi
+done
 
 cp "$OUT/good/summary.md" "$OUT/summary.md"
+for die in "${SHMOO_DIES[@]}"; do cp "$OUT/shmoo_$die/shmoo.svg" "$OUT/shmoo_$die.svg"; done
 if [ "$status" -eq 0 ]; then echo "== regress: PASS"; else echo "== regress: FAIL"; fi
 exit "$status"

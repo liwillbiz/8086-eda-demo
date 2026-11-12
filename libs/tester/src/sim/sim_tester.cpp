@@ -68,6 +68,11 @@ void SimTester::set_levels(const LevelSet& levels) {
   check_range(pin, "V_PIN", "VCC", levels.vcc, "V");
   check_range(pin, "V_PIN", "VIH", levels.vih, "V");
   check_range(pin, "V_PIN", "VIL", levels.vil, "V");
+  check_range(pin, "V_PIN", "VCH", levels.vch, "V");
+  check_range(pin, "V_PIN", "VCL", levels.vcl, "V");
+  if (!std::isfinite(levels.cl_pf) || levels.cl_pf < 0) {
+    throw std::out_of_range("set_levels: load capacitance must be >= 0 pF");
+  }
   for (double v : {levels.voh, levels.vol, levels.iol_ma, levels.ioh_ua}) {
     if (!std::isfinite(v)) throw std::out_of_range("set_levels: compare level or load is not finite");
   }

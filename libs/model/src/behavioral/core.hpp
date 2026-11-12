@@ -41,6 +41,9 @@ struct DieTiming {
   int64_t tdvcl, tcldx;    // read data
   int64_t tryhch, tchryx;  // READY
   int64_t tinvch;          // INTR, NMI, HOLD
+  // Internal critical path: the shortest CLK period at which write data settles
+  // (optional die key TCLCL_CRIT; 0 = no limit). Below it, write data is X.
+  int64_t tclcl_crit;
 
   static DieTiming from(const DieProfile&);
 };
@@ -130,6 +133,7 @@ class Core final : public DeviceModel {
   Logic sample(int pin, int64_t setup_ps) const;
   void watch_hold(int pin, Logic* slot, int64_t hold_ps);
   int64_t edge_gap_ps() const;
+  double clock_period_ps() const;
 
   void on_rising();
   void on_falling();
