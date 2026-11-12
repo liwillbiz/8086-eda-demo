@@ -51,3 +51,31 @@ interface choices M0 had to make where the design doc only sketched them.
 - **`verified: false`** marks every value the brief flags "(verify)": the whole of brief §6.1 and §6.2 (and the VCC/TA conditions they share), the clock measurement levels in the AC test conditions, and the individual §4.2 cells (8086-1 TDVCL, TCLAV, TCLRL, TCLRH; 8086-2/-1 TCHRYX and TINVCH). The 8086-1 TCLRL/TCLRH cells have no value in the brief; they carry the 8086-2 values as placeholders until X1.
 - **8086-1 TCLCH and TCHCL** are the fixed 53 ns and 39 ns the brief prints, not the formula (which would give 51.7 ns and 35.3 ns at 100 ns). The 8086 and 8086-2 columns use the formula.
 - **Validation is strict**: unknown or duplicate keys, missing `ref`/`verified`, unknown units, bad expressions, unknown variables or references, reference cycles, min > max at either end of a grade's clock range, incomplete decode tables, and pin-table errors all fail `Spec::load` with `file:line`. `libs/spec/tests/validation_test.cpp` covers each rule by mutating the real `spec.yaml`.
+
+## M2 golden emulator choices
+
+- **No frozen header changed.** `emulator.hpp` is identical to M0; the core lives in `libs/golden/src/cpu.{hpp,cpp}`. One **additive** header, `golden/rom.hpp`, adds the ROM loader (`read_binary`, `rom_program`, `load_rom`). It places a flat binary so that its last byte is at FFFFFh, which puts the reset entry FFFF0h 16 bytes from its end. Because it is under `libs/golden/include/`, CODEOWNERS asks the Spec & Integration lead to review it.
+- **Coverage:** the full §7.3 subset, plus most of the rest of the 8086 ISA, because the decode is shared: all ALU forms, SBB/NEG/NOT/TEST, every shift and rotate, MUL/IMUL/IDIV, the BCD adjusts, every string op with REP/REPE/REPNE, LOOP*/JCXZ, XCHG, LEA, LDS/LES, CBW/CWD, LAHF/SAHF, XLAT, INT 3/INTO. **`StopReason::Unimplemented`** covers WAIT (TEST# is not part of a `Program`), the undocumented D0–D3 /6, FE /2–/7, FF /7, 8F/C6/C7 with reg ≠ 0, and LEA/LDS/LES/far CALL/far JMP with a register operand. ESC (D8–DF) decodes its operand and does nothing, which is what an 8086 does without an 8087.
+- **Undocumented opcodes that are implemented** (brief D11): `0F` = POP CS, `D6` = SALC (AL = CF ? FFh : 00h), `60–6F` = aliases of `70–7F`, `C0/C1/C8/C9` = aliases of `C2/C3/CA/CB`, `82` = alias of `80`, `F1` = LOCK, F6/F7 /1 = TEST. 8C/8E decode only the low two bits of the segment field, so `MOV CS,r/m` is legal and acts as a jump. None of these raise type 6.
+- **Stop semantics.** HLT counts as an instruction, and IP is left past it. On Unimplemented, nothing has changed, IP points at the start of the instruction (its first prefix), and the instruction is not counted. On InstructionLimit, `instructions == max_instructions`.
+- **Memory** is 1 MB of zero-filled RAM. `Program::segments` is copied in order, wrapping at 1 MB. Every byte write is recorded in `mem_writes` in program order, including stack pushes and interrupt frames; a word write is two records, low byte first. Word accesses wrap **inside the segment** (a word at `xxxx:FFFF` uses `xxxx:0000` for its high byte). Physical addresses wrap at 1 MB (D5).
+- **I/O.** `IN` reads `Program::io_inputs[port]`: the whole 16-bit value for a word IN, and its low byte for a byte IN. A port that is not listed reads as an undriven bus (FFh / FFFFh). Every OUT is one `IoWrite` record.
+- **FLAGS representation.** `Result::regs.flags` holds only the nine real flags (mask 0FD5h), which matches `reset_registers()` (flags = 0). Bits 15–12 and bit 1 read as 1 wherever FLAGS reaches memory or AH: PUSHF, interrupt frames, and LAHF (D9). POPF, IRET, and SAHF store only the nine flags.
+- **Undefined flags are left unchanged.** The model may legitimately differ, so the M5 model-vs-golden comparison must mask these per instruction:
+
+  | Instruction | Undefined (golden leaves unchanged) |
+  |---|---|
+  | AND, OR, XOR, TEST | AF |
+  | SHL/SHR/SAR | AF; OF when count ≠ 1 |
+  | ROL/ROR/RCL/RCR | OF when count ≠ 1 |
+  | MUL, IMUL | SF, ZF, AF, PF |
+  | DIV, IDIV | all six arithmetic flags |
+  | AAA, AAS | OF, SF, ZF, PF |
+  | DAA, DAS | OF |
+  | AAM, AAD | OF, AF, CF |
+
+  A shift or rotate with a count of 0 changes no flags. The count is never masked (D8).
+- **Interrupts.** `InterruptEntry::instruction_index` is the 0-based index of the instruction that raised the interrupt (INT n, INT 3, INTO, divide error), or of the instruction after which the single-step trap was taken. The divide error stacks the IP of the instruction **after** DIV/IDIV/AAM (D3). The IDIV quotient range is ±127 / ±32767: a quotient of −128 / −32768 raises type 0 on the 8086.
+- **Single step (TF).** A type-1 trap follows every instruction that *started* with TF = 1, except an instruction that itself entered an interrupt, HLT (the run stops), and any segment-register load (MOV sreg, POP sreg), which on the 8086 inhibits the trap for one instruction. So POPF setting TF traps after the *next* instruction, and IRET into a TF = 1 context traps after the first instruction there (D10).
+- **Known simplifications.** A REP string instruction runs to completion as one instruction; on silicon a TF trap can split it per iteration. A `Program` has no INTR, NMI, HOLD, or TEST# stimulus, so the golden cannot predict A4, A5, or D7 as-is. M8 will need an additive field on `Program` (for example, interrupt requests keyed by instruction index), which means a frozen-header review.
+- **Tests** (`libs/golden/tests`): brief D1–D6 and D8–D11 vectors, a shift/rotate table, multiply/divide/BCD cases, control flow, strings, I/O capture, and the ROM loader. `flags_table_test.cpp` runs ADD/ADC/SUB/SBB/CMP/INC/DEC/NEG over every 8-bit operand pair (with and without CF in) and over 4 000 16-bit edge and fixed-seed random pairs. Results are checked against a reference written with plain signed arithmetic, and reported by the emulated program through PUSHF and OUT.
