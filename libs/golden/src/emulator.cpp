@@ -1,6 +1,6 @@
 #include "i8086/golden/emulator.hpp"
 
-#include "i8086/common/errors.hpp"
+#include "cpu.hpp"
 
 namespace i8086::golden {
 
@@ -10,8 +10,11 @@ Registers reset_registers() {
   return r;
 }
 
-Result Emulator::run(const Program&, uint64_t) const {
-  throw NotImplemented("golden::Emulator::run [M2]");
+Result Emulator::run(const Program& program, uint64_t max_instructions) const {
+  Result result;
+  detail::Cpu cpu(program, result);
+  cpu.run(max_instructions);
+  return result;
 }
 
 }  // namespace i8086::golden
