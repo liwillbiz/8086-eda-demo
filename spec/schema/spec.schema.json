@@ -2,33 +2,131 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/liwillbiz/8086-eda-demo/spec/schema/spec.schema.json",
   "title": "i8086 spec.yaml",
-  "description": "M0 skeleton. Extended in M1 with ac/dc/abs_max/conditions/decode entries; enforced by a hand-written validator in libs/spec run under ctest.",
+  "description": "Shape of spec.yaml (schema_version 1). Documentation for editors and reviewers; the authoritative check is the hand-written validator in libs/spec (Spec::load), run under ctest. The validator also checks things this schema cannot: expression syntax and variables, AC references and cycles, min <= max after evaluation, 40 unique pins, and fclk_max_mhz == 1000 / tclcl_ns[0].",
   "type": "object",
-  "required": ["schema_version", "device", "grades", "pins"],
+  "required": ["schema_version", "device", "grades", "pins", "conditions", "ac", "dc", "abs_max", "decode"],
+  "additionalProperties": false,
+  "$defs": {
+    "provenance": {
+      "type": "object",
+      "required": ["ref", "verified"],
+      "properties": {
+        "ref": { "type": "string", "minLength": 1 },
+        "verified": { "type": "boolean" }
+      }
+    },
+    "unit": { "enum": ["ns", "V", "mA", "uA", "pF", "C", "W", "MHz"] },
+    "bound": {
+      "description": "A number, or an expression string. AC: + - * / ( ), numbers, TCLCL (the test clock period) and SYM.min / SYM.max of another AC parameter. DC: the same operators and VCC.",
+      "oneOf": [{ "type": "number" }, { "type": "string", "minLength": 1 }]
+    },
+    "gradeBounds": {
+      "type": "object",
+      "additionalProperties": false,
+      "anyOf": [{ "required": ["min"] }, { "required": ["max"] }],
+      "properties": {
+        "min": { "$ref": "#/$defs/bound" },
+        "max": { "$ref": "#/$defs/bound" },
+        "ref": { "type": "string", "minLength": 1 },
+        "verified": { "type": "boolean" },
+        "note": { "type": "string" }
+      }
+    },
+    "param": {
+      "description": "Either flat min/max for every grade, or one block per grade (all three).",
+      "allOf": [{ "$ref": "#/$defs/provenance" }],
+      "type": "object",
+      "required": ["unit"],
+      "properties": {
+        "desc": { "type": "string" },
+        "note": { "type": "string" },
+        "unit": { "$ref": "#/$defs/unit" },
+        "ref": true,
+        "verified": true,
+        "min": { "$ref": "#/$defs/bound" },
+        "max": { "$ref": "#/$defs/bound" },
+        "8086": { "$ref": "#/$defs/gradeBounds" },
+        "8086-2": { "$ref": "#/$defs/gradeBounds" },
+        "8086-1": { "$ref": "#/$defs/gradeBounds" }
+      },
+      "oneOf": [
+        { "anyOf": [{ "required": ["min"] }, { "required": ["max"] }],
+          "not": { "anyOf": [{ "required": ["8086"] }, { "required": ["8086-2"] }, { "required": ["8086-1"] }] } },
+        { "required": ["8086", "8086-2", "8086-1"],
+          "not": { "anyOf": [{ "required": ["min"] }, { "required": ["max"] }] } }
+      ]
+    },
+    "flatLimit": {
+      "allOf": [{ "$ref": "#/$defs/provenance" }],
+      "type": "object",
+      "required": ["unit"],
+      "anyOf": [{ "required": ["min"] }, { "required": ["max"] }, { "required": ["value"] }],
+      "properties": {
+        "desc": { "type": "string" },
+        "unit": { "$ref": "#/$defs/unit" },
+        "ref": true,
+        "verified": true,
+        "min": { "type": "number" },
+        "max": { "type": "number" },
+        "value": { "type": "number", "description": "conditions only; sets min = max" }
+      }
+    },
+    "decodeTable": {
+      "allOf": [{ "$ref": "#/$defs/provenance" }],
+      "type": "object",
+      "required": ["bits", "table"],
+      "properties": {
+        "bits": { "type": "array", "items": { "type": "string" } },
+        "table": {
+          "type": "object",
+          "description": "Keys are the bits MSB-first as binary strings; every combination must be present.",
+          "propertyNames": { "pattern": "^[01]{2,3}$" },
+          "additionalProperties": { "type": "string", "minLength": 1 }
+        },
+        "ref": true,
+        "verified": true
+      },
+      "additionalProperties": false
+    }
+  },
   "properties": {
     "schema_version": { "const": 1 },
     "device": {
       "type": "object",
       "required": ["name", "package"],
-      "properties": { "name": { "type": "string" }, "package": { "type": "string" } }
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "package": { "type": "string" },
+        "ref": { "type": "string" },
+        "verified": { "type": "boolean" }
+      }
     },
     "grades": {
       "type": "object",
       "required": ["8086", "8086-2", "8086-1"],
+      "propertyNames": { "enum": ["8086", "8086-2", "8086-1"] },
       "additionalProperties": {
+        "allOf": [{ "$ref": "#/$defs/provenance" }],
         "type": "object",
         "required": ["fclk_max_mhz", "tclcl_ns"],
         "properties": {
           "fclk_max_mhz": { "type": "number" },
-          "tclcl_ns": { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2 }
-        }
+          "tclcl_ns": { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2 },
+          "ref": true,
+          "verified": true
+        },
+        "additionalProperties": false
       }
     },
     "pins": {
       "type": "array",
+      "minItems": 40,
+      "maxItems": 40,
       "items": {
         "type": "object",
         "required": ["num", "name", "dir", "ref", "verified"],
+        "additionalProperties": false,
         "properties": {
           "num": { "type": "integer", "minimum": 1, "maximum": 40 },
           "name": { "type": "string" },
@@ -40,11 +138,46 @@
           "bit": { "type": "integer" },
           "ref": { "type": "string" },
           "verified": { "type": "boolean" }
+        },
+        "dependentRequired": { "bus": ["bit"], "bit": ["bus"] }
+      }
+    },
+    "conditions": {
+      "type": "object",
+      "required": ["VCC", "TA"],
+      "additionalProperties": { "$ref": "#/$defs/flatLimit" }
+    },
+    "ac": {
+      "type": "object",
+      "not": { "required": ["TCLCL"] },
+      "additionalProperties": { "$ref": "#/$defs/param" }
+    },
+    "dc": {
+      "type": "object",
+      "additionalProperties": {
+        "allOf": [{ "$ref": "#/$defs/param" }],
+        "properties": {
+          "cond": { "type": "object", "additionalProperties": { "type": ["number", "string"] } }
         }
       }
     },
-    "ac": { "type": "object" },
-    "dc": { "type": "object" },
-    "abs_max": { "type": "object" }
+    "abs_max": {
+      "type": "object",
+      "additionalProperties": {
+        "allOf": [{ "$ref": "#/$defs/flatLimit" }],
+        "not": { "required": ["value"] }
+      }
+    },
+    "decode": {
+      "type": "object",
+      "required": ["status", "segment", "queue", "byte_enable"],
+      "additionalProperties": false,
+      "properties": {
+        "status": { "$ref": "#/$defs/decodeTable" },
+        "segment": { "$ref": "#/$defs/decodeTable" },
+        "queue": { "$ref": "#/$defs/decodeTable" },
+        "byte_enable": { "$ref": "#/$defs/decodeTable" }
+      }
+    }
   }
 }
