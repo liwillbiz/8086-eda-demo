@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/liwillbiz/8086-eda-demo/spec/schema/spec.schema.json",
+  "title": "i8086 spec.yaml",
+  "description": "M0 skeleton. Extended in M1 with ac/dc/abs_max/conditions/decode entries; enforced by a hand-written validator in libs/spec run under ctest.",
+  "type": "object",
+  "required": ["schema_version", "device", "grades", "pins"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "device": {
+      "type": "object",
+      "required": ["name", "package"],
+      "properties": { "name": { "type": "string" }, "package": { "type": "string" } }
+    },
+    "grades": {
+      "type": "object",
+      "required": ["8086", "8086-2", "8086-1"],
+      "additionalProperties": {
+        "type": "object",
+        "required": ["fclk_max_mhz", "tclcl_ns"],
+        "properties": {
+          "fclk_max_mhz": { "type": "number" },
+          "tclcl_ns": { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2 }
+        }
+      }
+    },
+    "pins": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["num", "name", "dir", "ref", "verified"],
+        "properties": {
+          "num": { "type": "integer", "minimum": 1, "maximum": 40 },
+          "name": { "type": "string" },
+          "dir": { "enum": ["in", "out", "io", "pwr"] },
+          "tristate": { "type": "boolean" },
+          "active_low": { "type": "boolean" },
+          "max_mode_name": { "type": "string" },
+          "bus": { "type": "string" },
+          "bit": { "type": "integer" },
+          "ref": { "type": "string" },
+          "verified": { "type": "boolean" }
+        }
+      }
+    },
+    "ac": { "type": "object" },
+    "dc": { "type": "object" },
+    "abs_max": { "type": "object" }
+  }
+}

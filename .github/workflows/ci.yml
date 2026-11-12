@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  regress:
+    name: ./regress
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Regression
+        run: ./regress
+
+      - name: Upload out/
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: regress-out
+          path: out/
+          if-no-files-found: ignore
+
+      - name: Job summary
+        if: always()
+        run: |
+          if [ -f out/summary.md ]; then cat out/summary.md >> "$GITHUB_STEP_SUMMARY"; fi
+
+  asan:
+    name: unit tests (ASan/UBSan)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure, build, test
+        run: |
+          cmake --preset asan
+          cmake --build --preset asan -j "$(nproc)"
+          ctest --preset asan

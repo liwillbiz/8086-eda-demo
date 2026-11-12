@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# One-command regression (design doc §8).
+#   ./regress            build, unit tests, test matrix on every die, baseline diff
+#   ./regress --accept   same, then overwrite regression/baselines/ (review the diff in your PR)
+set -euo pipefail
+
+cd "$(dirname "$0")"
+ACCEPT=0
+for arg in "$@"; do
+  case "$arg" in
+    --accept) ACCEPT=1 ;;
+    -h|--help) sed -n '2,4p' "$0"; exit 0 ;;
+    *) echo "regress: unknown argument $arg" >&2; exit 2 ;;
+  esac
+done
+
+export CMAKE_BUILD_PARALLEL_LEVEL="${CMAKE_BUILD_PARALLEL_LEVEL:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)}"
+BIN=build/regress/testprog/i86test
+OUT=out
+GRADES=8086,8086-2,8086-1
+VCC=4.5,5.0,5.5
+TEMP=0,70
+
+echo "== [1/4] configure, build, unit tests"
+cmake --workflow --preset regress
+
+rm -rf "$OUT"
+mkdir -p "$OUT"
+status=0
+
+echo "== [2/4] good die: all tests x grades {$GRADES} x VCC {$VCC} x TA {$TEMP}"
+"$BIN" --die spec/dies/good.yaml --grade "$GRADES" --vcc "$VCC" --temp "$TEMP" \
+       --tests '*' --out "$OUT/good" || status=1
+
+echo "== [3/4] fault-coverage dies"
+shopt -s nullglob
+fault_dies=(spec/dies/fault_*.yaml)
+if [ ${#fault_dies[@]} -eq 0 ]; then
+  echo "   (none yet; added in M7 together with regression/expected.yaml)"
+fi
+for die in "${fault_dies[@]}"; do
+  name=$(basename "$die" .yaml)
+  # M7: compare the failing set against regression/expected.yaml instead of ignoring it.
+  "$BIN" --die "$die" --grade "$GRADES" --vcc "$VCC" --temp "$TEMP" --out "$OUT/$name" || true
+done
+
+echo "== [4/4] baseline diff"
+mkdir -p regression/baselines
+if [ "$ACCEPT" -eq 1 ]; then
+  cp "$OUT/good/results.csv" regression/baselines/good_results.csv
+  echo "   accepted: regression/baselines/good_results.csv"
+elif [ -f regression/baselines/good_results.csv ]; then
+  if ! diff -u regression/baselines/good_results.csv "$OUT/good/results.csv"; then
+    echo "   results differ from baseline (run ./regress --accept if intended)"
+    status=1
+  fi
+else
+  echo "   (no baselines yet)"
+fi
+
+cp "$OUT/good/summary.md" "$OUT/summary.md"
+if [ "$status" -eq 0 ]; then echo "== regress: PASS"; else echo "== regress: FAIL"; fi
+exit "$status"
