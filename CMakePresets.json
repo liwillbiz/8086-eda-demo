@@ -30,7 +30,7 @@
       "name": "regress",
       "displayName": "Regression build used by ./regress and CI",
       "inherits": "base",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo", "I86_WERROR": "ON" }
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo", "I86_WERROR": "ON", "I86_REQUIRE_NASM": "ON" }
     }
   ],
   "buildPresets": [

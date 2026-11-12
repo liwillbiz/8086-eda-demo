@@ -32,6 +32,27 @@ std::string make_run_id() {
   return buf;
 }
 
+std::string fmt_num(double v) { return std::format("{:g}", v); }
+
+// "param = value, limit [min, max] unit: note" for the first failing record of a test.
+std::string first_failure(const Datalog& log, std::size_t from) {
+  for (std::size_t i = from; i < log.records().size(); ++i) {
+    const Record& r = log.records()[i];
+    if (r.result != Verdict::Fail) continue;
+    std::string msg = r.param + " = " + (r.value ? fmt_num(*r.value) : "none");
+    if (r.limit.min && r.limit.max && *r.limit.min == *r.limit.max) {
+      msg += ", expected " + fmt_num(*r.limit.min);
+    } else {
+      msg += ", limit [" + (r.limit.min ? fmt_num(*r.limit.min) : "") + ", " +
+             (r.limit.max ? fmt_num(*r.limit.max) : "") + "]";
+    }
+    if (!r.limit.unit.empty()) msg += " " + r.limit.unit;
+    if (!r.note.empty()) msg += ": " + r.note;
+    return msg;
+  }
+  return "failed without a failing datalog record";
+}
+
 }  // namespace
 
 RunSummary run(const RunConfig& cfg, const TestRegistry& registry, std::ostream& console) {
@@ -59,8 +80,10 @@ RunSummary run(const RunConfig& cfg, const TestRegistry& registry, std::ostream&
             t.set_temperature(temp);
             t.power(true);
             log.begin(id, point);
+            const std::size_t first_record = log.records().size();
             TestContext ctx{t, spec, grade, vcc, temp, log, &golden};
             row.verdict = test->run(ctx);
+            if (row.verdict == Verdict::Fail) row.message = first_failure(log, first_record);
           } catch (const NotImplemented& e) {
             row.message = e.what();
           } catch (const model::UnimplementedInstruction& e) {
