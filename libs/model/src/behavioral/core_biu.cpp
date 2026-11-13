@@ -371,7 +371,8 @@ void Core::on_falling() {
           ad_driven_at_latch_[i] = in_[static_cast<std::size_t>(p)].v;
           watch_hold(p, &ad_latch_[i], timing_.tcldx);
         }
-        drive(strobe_of(*cur_), Logic::L1, timing_.tclrh);
+        // The data is latched on this edge, so RD# only has to stay low for its hold time.
+        drive(strobe_of(*cur_), Logic::L1, timing_.tcldx);
       } else {
         drive(pins_.wr_n, Logic::L1, timing_.tcvctx);
       }
